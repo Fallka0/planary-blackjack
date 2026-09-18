@@ -163,6 +163,34 @@ ul, ol { padding: 0; list-style: none; }
   font-variant-numeric: tabular-nums;
 }
 .balance strong { font-weight: 700; }
+.who-chip {
+  max-width: 140px;
+  padding: 0 12px;
+  height: 40px;
+  display: inline-flex;
+  align-items: center;
+  border-radius: 14px;
+  background: var(--layer-1);
+  border: 1px solid var(--line);
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Shown for the moment it takes to hop through planary-auth. */
+.signing-in {
+  min-height: 100dvh;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 14px;
+  font-family: var(--font-poster);
+  font-size: 1.6rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  color: var(--text-2);
+}
 .balance-label { color: var(--text-3); font-size: 0.84rem; }
 
 /* ── Lobby ─────────────────────────────────────── */
@@ -198,8 +226,6 @@ ul, ol { padding: 0; list-style: none; }
 .lobby-lead { max-width: 40ch; font-size: 1.02rem; opacity: 0.9; }
 .who { font-size: 0.95rem; }
 
-.name-field { display: grid; gap: 6px; width: 100%; max-width: 320px; font-size: 0.85rem; font-weight: 600; }
-.name-field input,
 .code-row input {
   height: 46px;
   padding: 0 14px;
@@ -210,9 +236,7 @@ ul, ol { padding: 0; list-style: none; }
   font: inherit;
   font-size: 1rem;
 }
-.name-field input::placeholder,
 .code-row input::placeholder { color: rgba(246, 238, 228, 0.6); }
-.name-field input:focus-visible,
 .code-row input:focus-visible { outline: 2px solid var(--paper); outline-offset: 2px; }
 
 .lobby-cta { display: flex; flex-wrap: wrap; gap: 10px; }
@@ -220,7 +244,6 @@ ul, ol { padding: 0; list-style: none; }
 .code-row { display: flex; gap: 8px; }
 .code-row input { width: 220px; }
 .problem { padding: 10px 14px; border-radius: 12px; background: var(--ink); color: var(--paper); font-size: 0.9rem; }
-.guest-note { font-size: 0.88rem; opacity: 0.85; }
 .broke { display: grid; justify-items: start; gap: 10px; padding: 14px 16px; border-radius: 16px; background: rgba(34, 6, 14, 0.35); }
 
 .section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; }
@@ -525,7 +548,6 @@ body:has(.app-table) { height: 100%; overflow: hidden; overscroll-behavior: none
 .plate-copy { display: flex; flex-direction: column; min-width: 0; line-height: 1.25; }
 .plate-name { display: flex; align-items: center; gap: 6px; font-weight: 700; font-size: 0.92rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .plate-stack { font-size: 0.8rem; opacity: 0.8; font-variant-numeric: tabular-nums; }
-.guest-tag { padding: 0 6px; border-radius: 999px; background: rgba(246, 238, 228, 0.18); font-size: 0.7rem; font-weight: 600; }
 
 .seat-empty { align-self: end; }
 .sit {
@@ -707,7 +729,7 @@ body:has(.app-table) { height: 100%; overflow: hidden; overscroll-behavior: none
   .app { padding: 8px; gap: 8px; }
   .topbar { flex-wrap: wrap; min-height: 56px; padding: 8px; border-radius: var(--r-md); }
   .topbar-middle { order: 3; flex-basis: 100%; justify-content: flex-start; }
-  .brand-sub, .balance-label { display: none; }
+  .brand-sub, .balance-label, .who-chip { display: none; }
   .topbar-actions { margin-left: auto; }
 
   .lobby-hero { min-height: 640px; display: flex; align-items: flex-end; }

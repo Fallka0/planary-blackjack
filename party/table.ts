@@ -81,7 +81,7 @@ export class Table extends Server<Env> {
 
   async onConnect(conn: Connection, ctx: ConnectionContext) {
     const url = new URL(ctx.request.url);
-    const identity = await this.identify(url.searchParams.get("token"), url.searchParams.get("pid"), url.searchParams.get("name"));
+    const identity = await this.identify(url.searchParams.get("token"));
     conn.setState(identity);
     conn.send(JSON.stringify({ type: "chat", messages: this.chat, replace: true } satisfies ServerMessage));
 
@@ -116,25 +116,24 @@ export class Table extends Server<Env> {
     this.broadcastState();
   }
 
-  async identify(token: string | null, pid: string | null, name: string | null): Promise<Identity> {
+  /** Only Planary accounts can play; a connection without a valid token may only watch. */
+  async identify(token: string | null): Promise<Identity> {
     if (token) {
       try {
-        // planary-auth verifies the token with its own Supabase keys.
         const res = await fetch(`${this.env.AUTH_API_URL || "https://auth.planary.ch"}/api/auth/me`, {
           headers: { Authorization: `Bearer ${token}` },
         });
         if (res.ok) {
-          const { user } = (await res.json()) as { user?: { id: string; email?: string } };
+          const { user } = (await res.json()) as { user?: { id: string; email?: string; name?: string } };
           if (user?.id) {
-            return { playerId: `u-${user.id}`, name: cleanName(user.email?.split("@")[0]), verified: true };
+            return { playerId: `u-${user.id}`, name: cleanName(user.name || user.email?.split("@")[0]), verified: true };
           }
         }
       } catch {
-        // Fall through to a guest identity.
+        // Auth unreachable: treat as a spectator.
       }
     }
-    const guestId = pid && /^g-[a-z0-9-]{8,40}$/i.test(pid) ? pid : `g-${crypto.randomUUID()}`;
-    return { playerId: guestId, name: cleanName(name ?? "Guest"), verified: false };
+    return { playerId: `s-${crypto.randomUUID()}`, name: "Spectator", verified: false };
   }
 
   // ── Messages ──────────────────────────────────
@@ -156,6 +155,9 @@ export class Table extends Server<Env> {
   handle(msg: ClientMessage, who: Identity): string | void {
     const seatIndex = this.seatOf(who.playerId);
     const seat = seatIndex === null ? null : this.state.seats[seatIndex]!;
+
+    // Watching is open, playing and chatting need a Planary account.
+    if (!who.verified && msg.type !== "leave") return "Sign in with your Planary account to play.";
 
     switch (msg.type) {
       case "chat": {
@@ -179,8 +181,7 @@ export class Table extends Server<Env> {
         if (stack < MIN_BET) return `You need at least ${MIN_BET} chips to sit.`;
         this.state.seats[index] = {
           playerId: who.playerId,
-          name: who.verified ? who.name : cleanName(msg.name || who.name),
-          guest: !who.verified,
+          name: who.name,
           stack,
           bet: 0,
           lastBet: 0,

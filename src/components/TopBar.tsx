@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { ArrowLeft, LogIn, LogOut } from "lucide-react";
+import { ArrowLeft, LogOut } from "lucide-react";
 import { formatChips } from "../../shared/protocol";
 import { readChips } from "@/lib/identity";
 import { CASINO_URL } from "@/lib/auth";
@@ -13,7 +13,6 @@ export function useChips() {
   const { playerId } = useAuth();
   const [chips, setChips] = useState<number | null>(null);
   useEffect(() => {
-    if (!playerId) return;
     const update = () => setChips(readChips(playerId));
     update();
     window.addEventListener("pbj:chips", update);
@@ -27,7 +26,7 @@ export function useChips() {
 }
 
 export function TopBar({ children }: { children?: React.ReactNode }) {
-  const { user, loading, authAvailable, signIn, signOut } = useAuth();
+  const { user, signOut } = useAuth();
   const chips = useChips();
 
   return (
@@ -53,16 +52,12 @@ export function TopBar({ children }: { children?: React.ReactNode }) {
             <span className="balance-label">chips</span>
           </span>
         ) : null}
-        {loading || !authAvailable ? null : user ? (
-          <button className="icon-btn" onClick={() => void signOut()} aria-label={`Sign out ${user.email}`} title={user.email}>
-            <LogOut size={18} strokeWidth={1.9} aria-hidden="true" />
-          </button>
-        ) : (
-          <button className="btn btn-quiet btn-sm" onClick={() => signIn("login")}>
-            <LogIn size={16} strokeWidth={2} aria-hidden="true" />
-            Sign in
-          </button>
-        )}
+        <span className="who-chip" title={user.email}>
+          {user.name}
+        </span>
+        <button className="icon-btn" onClick={signOut} aria-label="Sign out" title="Sign out">
+          <LogOut size={18} strokeWidth={1.9} aria-hidden="true" />
+        </button>
       </div>
     </header>
   );

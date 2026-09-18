@@ -4,13 +4,13 @@ import PartySocket from "partysocket";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ChatMessage, ClientMessage, ServerMessage, TableState } from "../../shared/protocol";
 import { useAuth } from "@/components/AuthProvider";
-import { storedName, writeChips } from "./identity";
+import { writeChips } from "./identity";
 import { PARTY_HOST } from "./party";
 
 export type ConnectionStatus = "connecting" | "open" | "closed";
 
 export function useTable(tableId: string) {
-  const { accessToken, playerId, loading } = useAuth();
+  const { accessToken } = useAuth();
   const [state, setState] = useState<TableState | null>(null);
   const [you, setYou] = useState<{ playerId: string; seat: number | null; verified: boolean } | null>(null);
   const [status, setStatus] = useState<ConnectionStatus>("connecting");
@@ -19,16 +19,11 @@ export function useTable(tableId: string) {
   const socketRef = useRef<PartySocket | null>(null);
 
   useEffect(() => {
-    if (loading || !playerId) return;
     const socket = new PartySocket({
       host: PARTY_HOST,
       party: "table",
       room: tableId,
-      query: () => ({
-        token: accessToken ?? "",
-        pid: playerId.startsWith("g-") ? playerId : "",
-        name: storedName(),
-      }),
+      query: () => ({ token: accessToken }),
     });
     socketRef.current = socket;
     setStatus("connecting");
@@ -64,7 +59,7 @@ export function useTable(tableId: string) {
       socket.close();
       socketRef.current = null;
     };
-  }, [tableId, accessToken, playerId, loading]);
+  }, [tableId, accessToken]);
 
   useEffect(() => {
     if (!error) return;

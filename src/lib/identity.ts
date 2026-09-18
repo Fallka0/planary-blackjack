@@ -2,8 +2,6 @@ import { STARTER_CHIPS } from "../../shared/protocol";
 
 // Chips live in this browser until the Planary wallet exists (wallet logic comes later).
 
-const PID_KEY = "pbj.pid";
-const NAME_KEY = "pbj.name";
 const CHIPS_PREFIX = "pbj.chips.";
 
 function read(key: string) {
@@ -20,23 +18,6 @@ function write(key: string, value: string) {
   } catch {
     // Private mode or blocked storage: chips simply won't persist.
   }
-}
-
-export function guestId() {
-  let id = read(PID_KEY);
-  if (!id || !/^g-[a-z0-9-]{8,40}$/i.test(id)) {
-    id = `g-${crypto.randomUUID()}`;
-    write(PID_KEY, id);
-  }
-  return id;
-}
-
-export function storedName() {
-  return read(NAME_KEY) ?? "";
-}
-
-export function storeName(name: string) {
-  write(NAME_KEY, name.trim().slice(0, 18));
 }
 
 export function readChips(playerId: string) {

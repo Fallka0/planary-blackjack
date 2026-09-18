@@ -7,15 +7,18 @@ export interface StoredSession {
   accessToken: string;
   userId: string;
   email: string;
+  /** Display name from the Planary account. */
+  name: string;
   /** Epoch seconds. */
   expiresAt: number;
 }
 
-function decodeJwt(token: string): { sub?: string; email?: string; exp?: number } | null {
+function decodeJwt(token: string): { sub?: string; email?: string; name?: string; exp?: number } | null {
   try {
     const payload = token.split(".")[1];
-    const json = atob(payload.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(payload.length / 4) * 4, "="));
-    return JSON.parse(json);
+    const binary = atob(payload.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(payload.length / 4) * 4, "="));
+    // Names can contain any characters, so decode the bytes as UTF-8.
+    return JSON.parse(new TextDecoder().decode(Uint8Array.from(binary, (c) => c.charCodeAt(0))));
   } catch {
     return null;
   }
@@ -24,7 +27,8 @@ function decodeJwt(token: string): { sub?: string; email?: string; exp?: number 
 function fromToken(accessToken: string): StoredSession | null {
   const claims = decodeJwt(accessToken);
   if (!claims?.sub || !claims.exp) return null;
-  return { accessToken, userId: claims.sub, email: claims.email ?? "", expiresAt: claims.exp };
+  const email = claims.email ?? "";
+  return { accessToken, userId: claims.sub, email, name: claims.name || email.split("@")[0] || "Player", expiresAt: claims.exp };
 }
 
 /** Picks up `#access_token=…` after the redirect back from planary-auth and cleans the URL. */
@@ -43,6 +47,7 @@ export function loadSession(): StoredSession | null {
     const raw = window.localStorage.getItem(KEY);
     if (!raw) return null;
     const session = JSON.parse(raw) as StoredSession;
+    if (!session.name) return null;
     // Treat tokens within a minute of expiry as expired.
     if (session.expiresAt * 1000 < Date.now() + 60_000) {
       clearSession();

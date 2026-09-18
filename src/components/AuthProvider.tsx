@@ -1,80 +1,77 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
+import { buildAuthUrl, signOutUrl } from "@/lib/auth";
 import { absorbSessionFromHash, clearSession, loadSession, verifySession } from "@/lib/session";
-import { buildAuthUrl } from "@/lib/auth";
+import { ChipIcon } from "./ChipIcon";
 
 export interface PlanaryUser {
   id: string;
   email: string;
+  name: string;
 }
 
 interface AuthState {
-  user: PlanaryUser | null;
-  accessToken: string | null;
-  loading: boolean;
-  /** Sign-in is always available: it goes through planary-auth. */
-  authAvailable: boolean;
-  /** The id chips and seats are keyed by: the account when signed in, else the browser's guest id. */
-  playerId: string | null;
-  signIn: (mode?: "login" | "signup") => void;
-  signOut: () => Promise<void>;
+  user: PlanaryUser;
+  accessToken: string;
+  /** Chips and seats are keyed by the Planary account. */
+  playerId: string;
+  signOut: () => void;
 }
 
 const AuthContext = createContext<AuthState | null>(null);
 
+/** Only signed-in players get in. Without a session we hop to planary-auth, which sends
+ *  already-signed-in people straight back (single sign-on), so this is usually invisible. */
+function goSignIn() {
+  window.location.replace(buildAuthUrl("login", window.location.href.split("#")[0], true));
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<PlanaryUser | null>(null);
-  const [accessToken, setAccessToken] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [guest, setGuest] = useState<string | null>(null);
+  const [session, setSession] = useState<{ user: PlanaryUser; accessToken: string } | null>(null);
 
   useEffect(() => {
-    import("@/lib/identity").then(({ guestId }) => setGuest(guestId()));
     let active = true;
-    const session = absorbSessionFromHash() ?? loadSession();
-    if (!session) {
-      setLoading(false);
+    const stored = absorbSessionFromHash() ?? loadSession();
+    if (!stored) {
+      goSignIn();
       return;
     }
-    // Show the player straight away, then drop the session if planary-auth rejects the token.
-    setUser({ id: session.userId, email: session.email });
-    setAccessToken(session.accessToken);
-    setLoading(false);
-    void verifySession(session).then((ok) => {
+    setSession({ user: { id: stored.userId, email: stored.email, name: stored.name }, accessToken: stored.accessToken });
+
+    void verifySession(stored).then((ok) => {
       if (!active || ok) return;
       clearSession();
-      setUser(null);
-      setAccessToken(null);
+      goSignIn();
     });
-    // Sign out locally when the token expires.
+    // Tokens last an hour; fetch a fresh one the same silent way shortly before that.
     const timer = window.setTimeout(() => {
       clearSession();
-      setUser(null);
-      setAccessToken(null);
-    }, Math.max(0, session.expiresAt * 1000 - Date.now() - 60_000));
+      goSignIn();
+    }, Math.max(0, stored.expiresAt * 1000 - Date.now() - 60_000));
     return () => {
       active = false;
       window.clearTimeout(timer);
     };
   }, []);
 
-  const signIn = useCallback((mode: "login" | "signup" = "login") => {
-    window.location.assign(buildAuthUrl(mode, window.location.href.split("#")[0]));
-  }, []);
-
-  const signOut = useCallback(async () => {
+  const signOut = useCallback(() => {
     clearSession();
-    setUser(null);
-    setAccessToken(null);
+    // End the Planary session too, or single sign-on would put the player straight back in.
+    window.location.assign(signOutUrl());
   }, []);
 
-  const playerId = user ? `u-${user.id}` : guest;
+  if (!session) {
+    return (
+      <div className="signing-in" role="status">
+        <ChipIcon size={56} letter="21" />
+        <p>Signing you in…</p>
+      </div>
+    );
+  }
 
   return (
-    <AuthContext.Provider value={{ user, accessToken, loading, authAvailable: true, playerId, signIn, signOut }}>
-      {children}
-    </AuthContext.Provider>
+    <AuthContext.Provider value={{ ...session, playerId: `u-${session.user.id}`, signOut }}>{children}</AuthContext.Provider>
   );
 }
 

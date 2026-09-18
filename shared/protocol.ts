@@ -32,7 +32,6 @@ export interface Hand {
 export interface Seat {
   playerId: string;
   name: string;
-  guest: boolean;
   stack: number;
   /** Chips placed for the next round (betting phase). */
   bet: number;
@@ -58,7 +57,7 @@ export interface TableState {
 }
 
 export type ClientMessage =
-  | { type: "sit"; seat: number; stack: number; name: string }
+  | { type: "sit"; seat: number; stack: number }
   | { type: "leave" }
   | { type: "bet"; amount: number }
   | { type: "clearBet" }

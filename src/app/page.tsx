@@ -2,13 +2,13 @@
 
 import usePartySocket from "partysocket/react";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { ArrowRight, Lock, Users } from "lucide-react";
 import { formatChips, type LobbyMessage, type LobbyTable, MIN_BET, SEATS, STARTER_CHIPS } from "../../shared/protocol";
 import { useAuth } from "@/components/AuthProvider";
 import { Poster } from "@/components/Poster";
 import { TopBar, useChips } from "@/components/TopBar";
-import { storedName, storeName, writeChips } from "@/lib/identity";
+import { writeChips } from "@/lib/identity";
 import { lobbyRequest, PARTY_HOST, parseTableCode } from "@/lib/party";
 
 const PHASE_LABEL: Record<LobbyTable["phase"], string> = {
@@ -21,15 +21,12 @@ const PHASE_LABEL: Record<LobbyTable["phase"], string> = {
 
 export default function Lobby() {
   const router = useRouter();
-  const { user, playerId, authAvailable, signIn } = useAuth();
+  const { user, playerId } = useAuth();
   const chips = useChips();
   const [tables, setTables] = useState<LobbyTable[] | null>(null);
-  const [name, setName] = useState("");
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState<"quick" | "private" | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
-
-  useEffect(() => setName(storedName()), []);
 
   usePartySocket({
     host: PARTY_HOST,
@@ -46,7 +43,6 @@ export default function Lobby() {
 
   async function go(kind: "quick" | "private") {
     setProblem(null);
-    if (!user) storeName(name);
     setBusy(kind);
     try {
       const id = await lobbyRequest(kind === "quick" ? "quickseat" : "private");
@@ -64,7 +60,6 @@ export default function Lobby() {
       setProblem("That doesn't look like a table code. Codes are six letters and numbers, like k7m2qx.");
       return;
     }
-    if (!user) storeName(name);
     router.push(`/t/${id}`);
   }
 
@@ -84,27 +79,14 @@ export default function Lobby() {
               Up to five players against one dealer. Six-deck shoe, dealer stands on soft 17, blackjack pays 3 to 2.
             </p>
 
-            {user ? (
-              <p className="who">
-                Playing as <strong>{user.email.split("@")[0]}</strong>
-              </p>
-            ) : (
-              <label className="name-field">
-                <span>Your table name</span>
-                <input
-                  value={name}
-                  maxLength={18}
-                  placeholder="Guest"
-                  onChange={(event) => setName(event.target.value)}
-                  onBlur={() => storeName(name)}
-                />
-              </label>
-            )}
+            <p className="who">
+              Playing as <strong>{user.name}</strong>
+            </p>
 
             {broke ? (
               <div className="broke">
                 <p>You&apos;re out of chips. They&apos;re play money, so here&apos;s a fresh stack.</p>
-                <button className="btn btn-paper" onClick={() => playerId && writeChips(playerId, STARTER_CHIPS)}>
+                <button className="btn btn-paper" onClick={() => writeChips(playerId, STARTER_CHIPS)}>
                   Refill to {formatChips(STARTER_CHIPS)}
                 </button>
               </div>
@@ -141,15 +123,6 @@ export default function Lobby() {
             {problem ? (
               <p className="problem" role="alert">
                 {problem}
-              </p>
-            ) : null}
-            {!user && authAvailable ? (
-              <p className="guest-note">
-                Playing as a guest.{" "}
-                <button className="link-btn" onClick={() => signIn("login")}>
-                  Sign in with Planary
-                </button>{" "}
-                to play under your account.
               </p>
             ) : null}
           </div>

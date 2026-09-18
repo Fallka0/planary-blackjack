@@ -18,7 +18,7 @@ import { Chat } from "@/components/Chat";
 import { ChipIcon, chipBreakdown } from "@/components/ChipIcon";
 import { PlayingCard } from "@/components/PlayingCard";
 import { TopBar } from "@/components/TopBar";
-import { readChips, storedName, writeChips } from "@/lib/identity";
+import { readChips, writeChips } from "@/lib/identity";
 import { useTable } from "@/lib/useTable";
 
 function useNow(active: boolean) {
@@ -136,7 +136,6 @@ function SeatView({
         <span className="plate-copy">
           <span className="plate-name">
             {mine ? "You" : seat.name}
-            {seat.guest && !mine ? <span className="guest-tag">Guest</span> : null}
           </span>
           <span className="plate-stack">{seat.connected ? `${formatChips(seat.stack)} chips` : "Reconnecting…"}</span>
         </span>
@@ -310,11 +309,10 @@ export function Table({ id }: { id: string }) {
 
   const mySeat = you?.seat ?? null;
   const seat = state && mySeat !== null ? state.seats[mySeat] : null;
-  const chips = playerId ? readChips(playerId) : STARTER_CHIPS;
+  const chips = readChips(playerId);
 
   function sit(index: number) {
-    if (!playerId) return;
-    send({ type: "sit", seat: index, stack: readChips(playerId), name: storedName() });
+    send({ type: "sit", seat: index, stack: readChips(playerId) });
   }
 
   function copyLink() {
@@ -422,7 +420,7 @@ export function Table({ id }: { id: string }) {
             {mySeat === null && chips < MIN_BET ? (
               <div className="dock">
                 <p className="dock-note">You&apos;re out of chips.</p>
-                <button className="btn btn-paper" onClick={() => playerId && writeChips(playerId, STARTER_CHIPS)}>
+                <button className="btn btn-paper" onClick={() => writeChips(playerId, STARTER_CHIPS)}>
                   Refill to {formatChips(STARTER_CHIPS)}
                 </button>
               </div>
