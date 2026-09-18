@@ -1,0 +1,581 @@
+import type * as Party from "partykit/server";
+import { type Card, canSplitCards, handValue, isBlackjack, RANKS, SUITS } from "../shared/cards";
+import {
+  BETTING_MS,
+  CHAT_HISTORY,
+  CHAT_MAX_LENGTH,
+  type ChatMessage,
+  CHIP_VALUES,
+  type ClientMessage,
+  type Hand,
+  isPrivateTableId,
+  MAX_BET,
+  MIN_BET,
+  RECONNECT_GRACE_MS,
+  type Seat,
+  SEATS,
+  type ServerMessage,
+  SETTLE_MS,
+  type TableState,
+  TURN_MS,
+} from "../shared/protocol";
+
+const DECKS = 6;
+const RESHUFFLE_BELOW = 0.25;
+const DEALER_STEP_MS = 750;
+
+interface Identity {
+  playerId: string;
+  name: string;
+  verified: boolean;
+}
+
+function freshShoe(): Card[] {
+  const cards: Card[] = [];
+  for (let d = 0; d < DECKS; d++) for (const suit of SUITS) for (const rank of RANKS) cards.push({ rank, suit });
+  // Fisher–Yates with a cryptographic source.
+  const rand = new Uint32Array(cards.length);
+  crypto.getRandomValues(rand);
+  for (let i = cards.length - 1; i > 0; i--) {
+    const j = rand[i] % (i + 1);
+    [cards[i], cards[j]] = [cards[j], cards[i]];
+  }
+  return cards;
+}
+
+function cleanName(raw: unknown) {
+  const name = String(raw ?? "")
+    .replace(/[\u0000-\u001f\u007f<>]/g, "")
+    .trim()
+    .slice(0, 18);
+  return name || "Player";
+}
+
+export default class TableServer implements Party.Server {
+  state: TableState;
+  shoe: Card[] = freshShoe();
+  timer: ReturnType<typeof setTimeout> | null = null;
+  graceTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  /** Players who asked to leave (or dropped) mid-round; removed at the end of it. */
+  pendingLeave = new Set<string>();
+  chat: ChatMessage[] = [];
+  lastChatAt = new Map<string, number>();
+
+  constructor(readonly room: Party.Room) {
+    this.state = {
+      id: room.id,
+      isPrivate: isPrivateTableId(room.id),
+      phase: "waiting",
+      seats: Array.from({ length: SEATS }, () => null),
+      dealer: { cards: [], holeHidden: false },
+      turn: null,
+      deadline: null,
+      shoeRemaining: this.shoe.length,
+      shoeSize: DECKS * 52,
+      round: 1,
+    };
+  }
+
+  // ── Connections ───────────────────────────────
+
+  async onConnect(conn: Party.Connection, ctx: Party.ConnectionContext) {
+    const url = new URL(ctx.request.url);
+    const identity = await this.identify(url.searchParams.get("token"), url.searchParams.get("pid"), url.searchParams.get("name"));
+    conn.setState(identity);
+    conn.send(JSON.stringify({ type: "chat", messages: this.chat, replace: true } satisfies ServerMessage));
+
+    const seat = this.seatOf(identity.playerId);
+    if (seat !== null) {
+      const s = this.state.seats[seat]!;
+      s.connected = true;
+      const grace = this.graceTimers.get(identity.playerId);
+      if (grace) clearTimeout(grace);
+      this.graceTimers.delete(identity.playerId);
+    }
+    this.broadcastState();
+  }
+
+  onClose(conn: Party.Connection) {
+    const identity = conn.state as Identity | null;
+    if (!identity) return;
+    const stillHere = [...this.room.getConnections<Identity>()].some(
+      (c) => c.id !== conn.id && c.state?.playerId === identity.playerId,
+    );
+    if (stillHere) return;
+    const seat = this.seatOf(identity.playerId);
+    if (seat === null) return;
+    this.state.seats[seat]!.connected = false;
+    this.graceTimers.set(
+      identity.playerId,
+      setTimeout(() => {
+        this.graceTimers.delete(identity.playerId);
+        this.leave(identity.playerId);
+      }, RECONNECT_GRACE_MS),
+    );
+    this.broadcastState();
+  }
+
+  async identify(token: string | null, pid: string | null, name: string | null): Promise<Identity> {
+    const url = this.room.env.SUPABASE_URL as string | undefined;
+    const key = this.room.env.SUPABASE_ANON_KEY as string | undefined;
+    if (token && url && key) {
+      try {
+        const res = await fetch(`${url.replace(/\/+$/, "")}/auth/v1/user`, {
+          headers: { Authorization: `Bearer ${token}`, apikey: key },
+        });
+        if (res.ok) {
+          const user = (await res.json()) as { id: string; email?: string; user_metadata?: { full_name?: string } };
+          if (user.id) {
+            return {
+              playerId: `u-${user.id}`,
+              name: cleanName(user.user_metadata?.full_name || user.email?.split("@")[0]),
+              verified: true,
+            };
+          }
+        }
+      } catch {
+        // Fall through to a guest identity.
+      }
+    }
+    const guestId = pid && /^g-[a-z0-9-]{8,40}$/i.test(pid) ? pid : `g-${crypto.randomUUID()}`;
+    return { playerId: guestId, name: cleanName(name ?? "Guest"), verified: false };
+  }
+
+  // ── Messages ──────────────────────────────────
+
+  onMessage(raw: string | ArrayBuffer | ArrayBufferView, sender: Party.Connection) {
+    const identity = sender.state as Identity | null;
+    if (!identity || typeof raw !== "string") return;
+    let msg: ClientMessage;
+    try {
+      msg = JSON.parse(raw);
+    } catch {
+      return;
+    }
+    const error = this.handle(msg, identity);
+    if (error) sender.send(JSON.stringify({ type: "error", message: error } satisfies ServerMessage));
+    this.broadcastState();
+  }
+
+  handle(msg: ClientMessage, who: Identity): string | void {
+    const seatIndex = this.seatOf(who.playerId);
+    const seat = seatIndex === null ? null : this.state.seats[seatIndex]!;
+
+    switch (msg.type) {
+      case "chat": {
+        const text = String(msg.text ?? "")
+          .replace(/[\u0000-\u001f\u007f]/g, " ")
+          .trim()
+          .slice(0, CHAT_MAX_LENGTH);
+        if (!text) return;
+        const last = this.lastChatAt.get(who.playerId) ?? 0;
+        if (Date.now() - last < 700) return "Slow down a little.";
+        this.lastChatAt.set(who.playerId, Date.now());
+        this.postChat({ name: seat?.name ?? who.name, playerId: who.playerId, text });
+        return;
+      }
+      case "sit": {
+        if (seat) return "You're already seated.";
+        const index = Number(msg.seat);
+        if (!Number.isInteger(index) || index < 0 || index >= SEATS) return "That seat doesn't exist.";
+        if (this.state.seats[index]) return "That seat is taken.";
+        const stack = Math.max(0, Math.min(10_000_000, Math.floor(Number(msg.stack) || 0)));
+        if (stack < MIN_BET) return `You need at least ${MIN_BET} chips to sit.`;
+        this.state.seats[index] = {
+          playerId: who.playerId,
+          name: who.verified ? who.name : cleanName(msg.name || who.name),
+          guest: !who.verified,
+          stack,
+          bet: 0,
+          lastBet: 0,
+          ready: false,
+          hands: [],
+          activeHand: 0,
+          connected: true,
+        };
+        if (this.state.phase === "waiting") this.state.phase = "betting";
+        this.postChat({ name: null, playerId: null, text: `${this.state.seats[index]!.name} sat down at seat ${index + 1}.` });
+        this.notifyLobby();
+        return;
+      }
+      case "leave":
+        if (!seat) return;
+        this.leave(who.playerId);
+        return;
+      case "bet": {
+        if (!seat) return "Take a seat first.";
+        if (this.state.phase !== "betting") return "Bets are closed for this round.";
+        if (!CHIP_VALUES.includes(msg.amount as (typeof CHIP_VALUES)[number])) return "Unknown chip.";
+        const next = seat.bet + msg.amount;
+        if (next > MAX_BET) return `Table maximum is ${MAX_BET}.`;
+        if (next > seat.stack) return "Not enough chips.";
+        seat.bet = next;
+        seat.ready = false;
+        this.startBettingClock();
+        return;
+      }
+      case "clearBet":
+        if (!seat || this.state.phase !== "betting") return;
+        seat.bet = 0;
+        seat.ready = false;
+        return;
+      case "rebet": {
+        if (!seat || this.state.phase !== "betting") return;
+        const amount = Math.min(seat.lastBet, seat.stack, MAX_BET);
+        if (amount < MIN_BET) return "No previous bet to repeat.";
+        seat.bet = amount;
+        seat.ready = false;
+        this.startBettingClock();
+        return;
+      }
+      case "deal": {
+        if (!seat || this.state.phase !== "betting") return;
+        if (seat.bet < MIN_BET) return `Minimum bet is ${MIN_BET}.`;
+        seat.ready = true;
+        this.startBettingClock();
+        const seated = this.state.seats.filter((s): s is Seat => !!s && s.connected);
+        if (seated.every((s) => s.ready)) this.startRound();
+        return;
+      }
+      case "hit":
+      case "stand":
+      case "double":
+      case "split":
+        return this.play(msg.type, seatIndex);
+    }
+  }
+
+  // ── Round flow ────────────────────────────────
+
+  startBettingClock() {
+    if (this.state.deadline !== null) return;
+    this.state.deadline = Date.now() + BETTING_MS;
+    this.setTimer(BETTING_MS, () => this.startRound());
+  }
+
+  draw(): Card {
+    if (this.shoe.length === 0) this.shoe = freshShoe();
+    const card = this.shoe.pop()!;
+    this.state.shoeRemaining = this.shoe.length;
+    return card;
+  }
+
+  startRound() {
+    this.clearTimer();
+    const players = this.state.seats.filter((s): s is Seat => !!s && s.bet >= MIN_BET && s.bet <= s.stack);
+    if (players.length === 0) {
+      this.state.deadline = null;
+      this.broadcastState();
+      return;
+    }
+    if (this.shoe.length < DECKS * 52 * RESHUFFLE_BELOW) {
+      this.shoe = freshShoe();
+      this.state.shoeRemaining = this.shoe.length;
+    }
+
+    for (const seat of this.state.seats) {
+      if (!seat) continue;
+      if (players.includes(seat)) {
+        seat.stack -= seat.bet;
+        seat.lastBet = seat.bet;
+        seat.hands = [{ cards: [], bet: seat.bet, doubled: false, done: false, fromSplit: false }];
+      } else {
+        seat.hands = [];
+      }
+      seat.bet = 0;
+      seat.ready = false;
+      seat.activeHand = 0;
+    }
+
+    const dealer = this.state.dealer;
+    dealer.cards = [];
+    dealer.holeHidden = true;
+    for (let round = 0; round < 2; round++) {
+      for (const seat of players) seat.hands[0].cards.push(this.draw());
+      dealer.cards.push(this.draw());
+    }
+
+    for (const seat of players) {
+      if (isBlackjack(seat.hands[0].cards)) seat.hands[0].done = true;
+    }
+
+    // Dealer peeks for blackjack when showing an ace or a ten.
+    const up = handValue([dealer.cards[0]]).total;
+    if ((up === 10 || up === 11) && isBlackjack(dealer.cards)) {
+      dealer.holeHidden = false;
+      this.settle();
+      return;
+    }
+
+    this.state.phase = "playing";
+    this.state.turn = null;
+    this.state.deadline = null;
+    this.advanceTurn();
+  }
+
+  /** Moves to the next hand that still needs a decision, or hands over to the dealer. */
+  advanceTurn() {
+    this.clearTimer();
+    const seats = this.state.seats;
+    for (let s = 0; s < SEATS; s++) {
+      const seat = seats[s];
+      if (!seat) continue;
+      for (let h = 0; h < seat.hands.length; h++) {
+        const hand = seat.hands[h];
+        if (hand.done) continue;
+        if (this.pendingLeave.has(seat.playerId)) {
+          hand.done = true;
+          continue;
+        }
+        seat.activeHand = h;
+        this.state.turn = { seat: s, hand: h };
+        this.state.deadline = Date.now() + TURN_MS;
+        this.setTimer(TURN_MS, () => {
+          hand.done = true;
+          this.advanceTurn();
+          this.broadcastState();
+        });
+        return;
+      }
+    }
+    this.state.turn = null;
+    this.dealerPlay();
+  }
+
+  play(action: "hit" | "stand" | "double" | "split", seatIndex: number | null): string | void {
+    const turn = this.state.turn;
+    if (this.state.phase !== "playing" || !turn || turn.seat !== seatIndex) return "It's not your turn.";
+    const seat = this.state.seats[turn.seat]!;
+    const hand = seat.hands[turn.hand];
+
+    if (action === "hit") {
+      hand.cards.push(this.draw());
+      const { total } = handValue(hand.cards);
+      if (total > 21) {
+        hand.done = true;
+        hand.result = "bust";
+      } else if (total === 21) {
+        hand.done = true;
+      }
+    } else if (action === "stand") {
+      hand.done = true;
+    } else if (action === "double") {
+      if (hand.cards.length !== 2) return "You can only double on your first two cards.";
+      if (seat.stack < hand.bet) return "Not enough chips to double.";
+      seat.stack -= hand.bet;
+      hand.bet *= 2;
+      hand.doubled = true;
+      hand.cards.push(this.draw());
+      hand.done = true;
+      if (handValue(hand.cards).total > 21) hand.result = "bust";
+    } else if (action === "split") {
+      if (seat.hands.length > 1) return "You can split once per round.";
+      if (!canSplitCards(hand.cards)) return "Only pairs can be split.";
+      if (seat.stack < hand.bet) return "Not enough chips to split.";
+      seat.stack -= hand.bet;
+      const aces = hand.cards[0].rank === "A";
+      const second: Hand = { cards: [hand.cards.pop()!], bet: hand.bet, doubled: false, done: false, fromSplit: true };
+      hand.fromSplit = true;
+      hand.cards.push(this.draw());
+      second.cards.push(this.draw());
+      seat.hands.push(second);
+      for (const h of seat.hands) {
+        // Split aces get one card each; any split hand on 21 is finished.
+        if (aces || handValue(h.cards).total === 21) h.done = true;
+      }
+    }
+
+    if (hand.done) this.advanceTurn();
+  }
+
+  dealerPlay() {
+    this.clearTimer();
+    this.state.phase = "dealer";
+    this.state.deadline = null;
+    const dealer = this.state.dealer;
+    dealer.holeHidden = false;
+
+    const live = this.state.seats.some((s) => s?.hands.some((h) => h.result !== "bust" && !(isBlackjack(h.cards) && !h.fromSplit)));
+    const step = () => {
+      if (live && handValue(dealer.cards).total < 17) {
+        dealer.cards.push(this.draw());
+        this.broadcastState();
+        this.setTimer(DEALER_STEP_MS, step);
+      } else {
+        this.settle();
+        this.broadcastState();
+      }
+    };
+    this.broadcastState();
+    this.setTimer(DEALER_STEP_MS, step);
+  }
+
+  settle() {
+    this.clearTimer();
+    const dealerCards = this.state.dealer.cards;
+    const dealerTotal = handValue(dealerCards).total;
+    const dealerBJ = isBlackjack(dealerCards);
+
+    for (const seat of this.state.seats) {
+      if (!seat) continue;
+      for (const hand of seat.hands) {
+        const total = handValue(hand.cards).total;
+        const natural = isBlackjack(hand.cards) && !hand.fromSplit;
+        if (hand.result === "bust" || total > 21) {
+          hand.result = "bust";
+          hand.net = -hand.bet;
+        } else if (natural && !dealerBJ) {
+          const win = Math.floor(hand.bet * 1.5);
+          seat.stack += hand.bet + win;
+          hand.result = "blackjack";
+          hand.net = win;
+        } else if (dealerBJ) {
+          if (natural) {
+            seat.stack += hand.bet;
+            hand.result = "push";
+            hand.net = 0;
+          } else {
+            hand.result = "lose";
+            hand.net = -hand.bet;
+          }
+        } else if (dealerTotal > 21 || total > dealerTotal) {
+          seat.stack += hand.bet * 2;
+          hand.result = "win";
+          hand.net = hand.bet;
+        } else if (total === dealerTotal) {
+          seat.stack += hand.bet;
+          hand.result = "push";
+          hand.net = 0;
+        } else {
+          hand.result = "lose";
+          hand.net = -hand.bet;
+        }
+        hand.done = true;
+      }
+    }
+
+    this.state.phase = "settle";
+    this.state.turn = null;
+    this.state.dealer.holeHidden = false;
+    this.state.deadline = Date.now() + SETTLE_MS;
+    this.setTimer(SETTLE_MS, () => {
+      this.nextRound();
+      this.broadcastState();
+    });
+  }
+
+  nextRound() {
+    for (const playerId of this.pendingLeave) this.removeSeat(playerId);
+    this.pendingLeave.clear();
+    for (const seat of this.state.seats) {
+      if (!seat) continue;
+      seat.hands = [];
+      seat.activeHand = 0;
+      seat.bet = 0;
+      seat.ready = false;
+    }
+    this.state.dealer = { cards: [], holeHidden: false };
+    this.state.turn = null;
+    this.state.deadline = null;
+    this.state.round += 1;
+    this.state.phase = this.state.seats.some(Boolean) ? "betting" : "waiting";
+  }
+
+  leave(playerId: string) {
+    const seat = this.seatOf(playerId);
+    if (seat === null) return;
+    const inRound = this.state.seats[seat]!.hands.length > 0 && (this.state.phase === "playing" || this.state.phase === "dealer");
+    if (inRound) {
+      this.pendingLeave.add(playerId);
+      if (this.state.turn?.seat === seat) {
+        for (const hand of this.state.seats[seat]!.hands) hand.done = true;
+        this.advanceTurn();
+      }
+    } else {
+      this.removeSeat(playerId);
+    }
+    this.broadcastState();
+  }
+
+  removeSeat(playerId: string) {
+    const seat = this.seatOf(playerId);
+    if (seat === null) return;
+    this.postChat({ name: null, playerId: null, text: `${this.state.seats[seat]!.name} left the table.` });
+    this.state.seats[seat] = null;
+    if (!this.state.seats.some(Boolean)) {
+      this.clearTimer();
+      this.state.phase = "waiting";
+      this.state.deadline = null;
+    } else if (this.state.phase === "betting") {
+      const seated = this.state.seats.filter((s): s is Seat => !!s && s.connected);
+      if (seated.length > 0 && seated.every((s) => s.ready)) this.startRound();
+    }
+    this.notifyLobby();
+  }
+
+  // ── Helpers ───────────────────────────────────
+
+  postChat(entry: Omit<ChatMessage, "id" | "at">) {
+    const message: ChatMessage = { id: crypto.randomUUID(), at: Date.now(), ...entry };
+    this.chat.push(message);
+    if (this.chat.length > CHAT_HISTORY) this.chat.splice(0, this.chat.length - CHAT_HISTORY);
+    this.room.broadcast(JSON.stringify({ type: "chat", messages: [message], replace: false } satisfies ServerMessage));
+  }
+
+  seatOf(playerId: string): number | null {
+    const index = this.state.seats.findIndex((s) => s?.playerId === playerId);
+    return index === -1 ? null : index;
+  }
+
+  setTimer(ms: number, fn: () => void) {
+    this.clearTimer();
+    this.timer = setTimeout(() => {
+      this.timer = null;
+      fn();
+      this.broadcastState();
+    }, ms);
+  }
+
+  clearTimer() {
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = null;
+  }
+
+  broadcastState() {
+    for (const conn of this.room.getConnections<Identity>()) {
+      const id = conn.state;
+      if (!id) continue;
+      const message: ServerMessage = {
+        type: "state",
+        state: this.publicState(),
+        you: { playerId: id.playerId, seat: this.seatOf(id.playerId), verified: id.verified },
+        now: Date.now(),
+      };
+      conn.send(JSON.stringify(message));
+    }
+  }
+
+  /** The hole card never leaves the server while it's face down. */
+  publicState(): TableState {
+    const { dealer } = this.state;
+    return {
+      ...this.state,
+      dealer: {
+        holeHidden: dealer.holeHidden,
+        cards: dealer.holeHidden ? dealer.cards.slice(0, 1) : dealer.cards,
+      },
+    };
+  }
+
+  notifyLobby() {
+    if (this.state.isPrivate) return;
+    const seated = this.state.seats.filter(Boolean).length;
+    void this.room.context.parties.lobby
+      .get("main")
+      .fetch({
+        method: "POST",
+        body: JSON.stringify({ id: this.room.id, seated, phase: this.state.phase }),
+      })
+      .catch(() => {});
+  }
+}
