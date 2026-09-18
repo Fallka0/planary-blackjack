@@ -1,4 +1,4 @@
-export const PARTY_HOST = process.env.NEXT_PUBLIC_PARTYKIT_HOST ?? "localhost:1999";
+export const PARTY_HOST = process.env.NEXT_PUBLIC_PARTYKIT_HOST || "localhost:1999";
 
 const protocol = PARTY_HOST.startsWith("localhost") || PARTY_HOST.startsWith("127.") ? "http" : "https";
 
