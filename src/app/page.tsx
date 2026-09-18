@@ -4,11 +4,12 @@ import usePartySocket from "partysocket/react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { ArrowRight, Lock, Users } from "lucide-react";
-import { formatChips, type LobbyMessage, type LobbyTable, MIN_BET, SEATS, STARTER_CHIPS } from "../../shared/protocol";
+import { type LobbyMessage, type LobbyTable, MIN_BET, SEATS } from "../../shared/protocol";
 import { useAuth } from "@/components/AuthProvider";
 import { Poster } from "@/components/Poster";
-import { TopBar, useChips } from "@/components/TopBar";
-import { writeChips } from "@/lib/identity";
+import { TopBar } from "@/components/TopBar";
+import { useWallet } from "@/components/WalletProvider";
+import { CASINO_URL } from "@/lib/auth";
 import { lobbyRequest, PARTY_HOST, parseTableCode } from "@/lib/party";
 
 const PHASE_LABEL: Record<LobbyTable["phase"], string> = {
@@ -21,8 +22,8 @@ const PHASE_LABEL: Record<LobbyTable["phase"], string> = {
 
 export default function Lobby() {
   const router = useRouter();
-  const { user, playerId } = useAuth();
-  const chips = useChips();
+  const { user } = useAuth();
+  const { balance: chips } = useWallet();
   const [tables, setTables] = useState<LobbyTable[] | null>(null);
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState<"quick" | "private" | null>(null);
@@ -85,10 +86,10 @@ export default function Lobby() {
 
             {broke ? (
               <div className="broke">
-                <p>You&apos;re out of chips. They&apos;re play money, so here&apos;s a fresh stack.</p>
-                <button className="btn btn-paper" onClick={() => writeChips(playerId, STARTER_CHIPS)}>
-                  Refill to {formatChips(STARTER_CHIPS)}
-                </button>
+                <p>You&apos;re out of chips. Claim your daily bonus in the casino or ask a friend to send you some.</p>
+                <a className="btn btn-paper" href={`${CASINO_URL}/chips`}>
+                  Get chips
+                </a>
               </div>
             ) : (
               <div className="lobby-cta">

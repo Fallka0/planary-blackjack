@@ -10,15 +10,14 @@ import {
   MAX_BET,
   MIN_BET,
   type Seat,
-  STARTER_CHIPS,
   type TableState,
 } from "../../../../shared/protocol";
-import { useAuth } from "@/components/AuthProvider";
 import { Chat } from "@/components/Chat";
 import { ChipIcon, chipBreakdown } from "@/components/ChipIcon";
 import { PlayingCard } from "@/components/PlayingCard";
 import { TopBar } from "@/components/TopBar";
-import { readChips, writeChips } from "@/lib/identity";
+import { useWallet } from "@/components/WalletProvider";
+import { CASINO_URL } from "@/lib/auth";
 import { useTable } from "@/lib/useTable";
 
 function useNow(active: boolean) {
@@ -295,7 +294,7 @@ function Dock({
 }
 
 export function Table({ id }: { id: string }) {
-  const { playerId } = useAuth();
+  const { balance } = useWallet();
   const { state, you, status, error, chat, send } = useTable(id);
   const [copied, setCopied] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
@@ -309,10 +308,10 @@ export function Table({ id }: { id: string }) {
 
   const mySeat = you?.seat ?? null;
   const seat = state && mySeat !== null ? state.seats[mySeat] : null;
-  const chips = readChips(playerId);
+  const chips = balance ?? 0;
 
   function sit(index: number) {
-    send({ type: "sit", seat: index, stack: readChips(playerId) });
+    send({ type: "sit", seat: index });
   }
 
   function copyLink() {
@@ -417,12 +416,12 @@ export function Table({ id }: { id: string }) {
 
         {state ? (
           <>
-            {mySeat === null && chips < MIN_BET ? (
+            {mySeat === null && balance !== null && balance < MIN_BET ? (
               <div className="dock">
-                <p className="dock-note">You&apos;re out of chips.</p>
-                <button className="btn btn-paper" onClick={() => writeChips(playerId, STARTER_CHIPS)}>
-                  Refill to {formatChips(STARTER_CHIPS)}
-                </button>
+                <p className="dock-note">You&apos;re out of chips. Claim your daily bonus in the casino, then come back.</p>
+                <a className="btn btn-paper" href={`${CASINO_URL}/chips`}>
+                  Get chips
+                </a>
               </div>
             ) : (
               <Dock state={state} seat={seat} mySeat={mySeat} send={send} now={now} />

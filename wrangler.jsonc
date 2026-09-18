@@ -9,5 +9,6 @@
       { "name": "Lobby", "class_name": "Lobby" }
     ]
   },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Table", "Lobby"] }]
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Table", "Lobby"] }],
+  "services": [{ "binding": "CASINO", "service": "planary-casino-api" }]
 }

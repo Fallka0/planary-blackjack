@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Big_Shoulders, Onest } from "next/font/google";
 import { AuthProvider } from "@/components/AuthProvider";
+import { WalletProvider } from "@/components/WalletProvider";
 import "./globals.css";
 
 const ui = Onest({ variable: "--font-ui", subsets: ["latin"] });
@@ -18,7 +19,9 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="en" className={`${ui.variable} ${poster.variable}`}>
       <body>
-        <AuthProvider>{children}</AuthProvider>
+        <AuthProvider>
+          <WalletProvider>{children}</WalletProvider>
+        </AuthProvider>
       </body>
     </html>
   );

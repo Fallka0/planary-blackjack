@@ -1,33 +1,16 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
 import { ArrowLeft, LogOut } from "lucide-react";
 import { formatChips } from "../../shared/protocol";
-import { readChips } from "@/lib/identity";
 import { CASINO_URL } from "@/lib/auth";
 import { useAuth } from "./AuthProvider";
+import { useWallet } from "./WalletProvider";
 import { ChipIcon } from "./ChipIcon";
-
-export function useChips() {
-  const { playerId } = useAuth();
-  const [chips, setChips] = useState<number | null>(null);
-  useEffect(() => {
-    const update = () => setChips(readChips(playerId));
-    update();
-    window.addEventListener("pbj:chips", update);
-    window.addEventListener("storage", update);
-    return () => {
-      window.removeEventListener("pbj:chips", update);
-      window.removeEventListener("storage", update);
-    };
-  }, [playerId]);
-  return chips;
-}
 
 export function TopBar({ children }: { children?: React.ReactNode }) {
   const { user, signOut } = useAuth();
-  const chips = useChips();
+  const { balance: chips } = useWallet();
 
   return (
     <header className="topbar">
@@ -46,7 +29,7 @@ export function TopBar({ children }: { children?: React.ReactNode }) {
 
       <div className="topbar-actions">
         {chips !== null ? (
-          <span className="balance" title="Play money, kept in this browser for now">
+          <span className="balance" title="Play money, shared across Planary Casino">
             <ChipIcon size={20} />
             <strong>{formatChips(chips)}</strong>
             <span className="balance-label">chips</span>

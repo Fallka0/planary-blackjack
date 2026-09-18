@@ -57,7 +57,7 @@ export interface TableState {
 }
 
 export type ClientMessage =
-  | { type: "sit"; seat: number; stack: number }
+  | { type: "sit"; seat: number }
   | { type: "leave" }
   | { type: "bet"; amount: number }
   | { type: "clearBet" }

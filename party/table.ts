@@ -60,6 +60,10 @@ export class Table extends Server<Env> {
   /** Players who asked to leave (or dropped) mid-round; removed at the end of it. */
   pendingLeave = new Set<string>();
   chat: ChatMessage[] = [];
+  /** True while bets are being taken from the wallet at round start. */
+  starting = false;
+  /** True while a double/split is waiting on the wallet. */
+  busy = false;
   lastChatAt = new Map<string, number>();
 
   onStart() {
@@ -136,9 +140,35 @@ export class Table extends Server<Env> {
     return { playerId: `s-${crypto.randomUUID()}`, name: "Spectator", verified: false };
   }
 
+  // ── Wallet (planary-casino-api) ───────────────
+
+  /** Chips live in the casino wallet; the table only moves them, worker to worker. */
+  async wallet(path: string, body: Record<string, unknown>): Promise<{ ok?: boolean; balance: number }> {
+    const res = await this.env.CASINO.fetch(
+      new Request(`https://casino.internal${path}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-internal-key": this.env.INTERNAL_KEY },
+        body: JSON.stringify(body),
+      }),
+    );
+    if (!res.ok) throw new Error(`wallet ${path} → ${res.status}`);
+    return res.json();
+  }
+
+  userId(playerId: string) {
+    return playerId.replace(/^u-/, "");
+  }
+
+  /** Sends a message to one player's open connections. */
+  tell(playerId: string, message: string) {
+    for (const conn of this.getConnections<Identity>()) {
+      if (conn.state?.playerId === playerId) conn.send(JSON.stringify({ type: "error", message } satisfies ServerMessage));
+    }
+  }
+
   // ── Messages ──────────────────────────────────
 
-  onMessage(sender: Connection, raw: WSMessage) {
+  async onMessage(sender: Connection, raw: WSMessage) {
     const identity = sender.state as Identity | null;
     if (!identity || typeof raw !== "string") return;
     let msg: ClientMessage;
@@ -147,12 +177,12 @@ export class Table extends Server<Env> {
     } catch {
       return;
     }
-    const error = this.handle(msg, identity);
+    const error = await this.handle(msg, identity);
     if (error) sender.send(JSON.stringify({ type: "error", message: error } satisfies ServerMessage));
     this.broadcastState();
   }
 
-  handle(msg: ClientMessage, who: Identity): string | void {
+  async handle(msg: ClientMessage, who: Identity): Promise<string | void> {
     const seatIndex = this.seatOf(who.playerId);
     const seat = seatIndex === null ? null : this.state.seats[seatIndex]!;
 
@@ -177,8 +207,15 @@ export class Table extends Server<Env> {
         const index = Number(msg.seat);
         if (!Number.isInteger(index) || index < 0 || index >= SEATS) return "That seat doesn't exist.";
         if (this.state.seats[index]) return "That seat is taken.";
-        const stack = Math.max(0, Math.min(10_000_000, Math.floor(Number(msg.stack) || 0)));
-        if (stack < MIN_BET) return `You need at least ${MIN_BET} chips to sit.`;
+        let stack: number;
+        try {
+          ({ balance: stack } = await this.wallet("/internal/wallet", { userId: this.userId(who.playerId), name: who.name }));
+        } catch {
+          return "Chips are unavailable right now. Try again in a moment.";
+        }
+        if (stack < MIN_BET) return "You're out of chips. Claim your daily bonus in the casino.";
+        // The seat may have been taken while we asked the wallet.
+        if (this.state.seats[index] || this.seatOf(who.playerId) !== null) return "That seat is taken.";
         this.state.seats[index] = {
           playerId: who.playerId,
           name: who.name,
@@ -201,7 +238,7 @@ export class Table extends Server<Env> {
         return;
       case "bet": {
         if (!seat) return "Take a seat first.";
-        if (this.state.phase !== "betting") return "Bets are closed for this round.";
+        if (this.state.phase !== "betting" || this.starting) return "Bets are closed for this round.";
         if (!CHIP_VALUES.includes(msg.amount as (typeof CHIP_VALUES)[number])) return "Unknown chip.";
         const next = seat.bet + msg.amount;
         if (next > MAX_BET) return `Table maximum is ${MAX_BET}.`;
@@ -212,12 +249,12 @@ export class Table extends Server<Env> {
         return;
       }
       case "clearBet":
-        if (!seat || this.state.phase !== "betting") return;
+        if (!seat || this.state.phase !== "betting" || this.starting) return;
         seat.bet = 0;
         seat.ready = false;
         return;
       case "rebet": {
-        if (!seat || this.state.phase !== "betting") return;
+        if (!seat || this.state.phase !== "betting" || this.starting) return;
         const amount = Math.min(seat.lastBet, seat.stack, MAX_BET);
         if (amount < MIN_BET) return "No previous bet to repeat.";
         seat.bet = amount;
@@ -226,12 +263,12 @@ export class Table extends Server<Env> {
         return;
       }
       case "deal": {
-        if (!seat || this.state.phase !== "betting") return;
+        if (!seat || this.state.phase !== "betting" || this.starting) return;
         if (seat.bet < MIN_BET) return `Minimum bet is ${MIN_BET}.`;
         seat.ready = true;
         this.startBettingClock();
         const seated = this.state.seats.filter((s): s is Seat => !!s && s.connected);
-        if (seated.every((s) => s.ready)) this.startRound();
+        if (seated.every((s) => s.ready)) void this.startRound();
         return;
       }
       case "hit":
@@ -247,7 +284,7 @@ export class Table extends Server<Env> {
   startBettingClock() {
     if (this.state.deadline !== null) return;
     this.state.deadline = Date.now() + BETTING_MS;
-    this.setTimer(BETTING_MS, () => this.startRound());
+    this.setTimer(BETTING_MS, () => void this.startRound());
   }
 
   draw(): Card {
@@ -257,14 +294,52 @@ export class Table extends Server<Env> {
     return card;
   }
 
-  startRound() {
+  async startRound() {
+    if (this.starting || this.state.phase !== "betting") return;
+    this.starting = true;
     this.clearTimer();
-    const players = this.state.seats.filter((s): s is Seat => !!s && s.bet >= MIN_BET && s.bet <= s.stack);
-    if (players.length === 0) {
-      this.state.deadline = null;
+    try {
+      // Take every bet from the wallet first; a bet the wallet can't cover sits the round out.
+      const candidates = this.state.seats.filter((s): s is Seat => !!s && s.bet >= MIN_BET);
+      const players: Seat[] = [];
+      await Promise.all(
+        candidates.map(async (seat) => {
+          try {
+            const res = await this.wallet("/internal/debit", {
+              userId: this.userId(seat.playerId),
+              amount: seat.bet,
+              game: "blackjack",
+              ref: this.name,
+            });
+            seat.stack = res.balance;
+            if (res.ok) players.push(seat);
+            else this.tell(seat.playerId, "Not enough chips for that bet, so you sit this round out.");
+          } catch {
+            this.tell(seat.playerId, "Chips are unavailable right now, so you sit this round out.");
+          }
+        }),
+      );
+      // Someone who left while we were at the wallet gets their bet back.
+      for (const seat of players.filter((p) => !this.state.seats.includes(p))) {
+        void this.wallet("/internal/credit", { userId: this.userId(seat.playerId), amount: seat.bet, game: "blackjack", ref: this.name }).catch(
+          (error) => console.error("refund failed", error),
+        );
+      }
+      const seated = players.filter((p) => this.state.seats.includes(p));
+      if (seated.length === 0) {
+        for (const seat of this.state.seats) if (seat) seat.ready = false;
+        this.state.deadline = null;
+        this.broadcastState();
+        return;
+      }
+      this.deal(seated);
+    } finally {
+      this.starting = false;
       this.broadcastState();
-      return;
     }
+  }
+
+  deal(players: Seat[]) {
     if (this.shoe.length < DECKS * 52 * RESHUFFLE_BELOW) {
       this.shoe = freshShoe();
       this.state.shoeRemaining = this.shoe.length;
@@ -273,7 +348,6 @@ export class Table extends Server<Env> {
     for (const seat of this.state.seats) {
       if (!seat) continue;
       if (players.includes(seat)) {
-        seat.stack -= seat.bet;
         seat.lastBet = seat.bet;
         seat.hands = [{ cards: [], bet: seat.bet, doubled: false, done: false, fromSplit: false }];
       } else {
@@ -300,7 +374,7 @@ export class Table extends Server<Env> {
     const up = handValue([dealer.cards[0]]).total;
     if ((up === 10 || up === 11) && isBlackjack(dealer.cards)) {
       dealer.holeHidden = false;
-      this.settle();
+      void this.settle();
       return;
     }
 
@@ -339,9 +413,31 @@ export class Table extends Server<Env> {
     this.dealerPlay();
   }
 
-  play(action: "hit" | "stand" | "double" | "split", seatIndex: number | null): string | void {
+  /** Takes the extra stake for a double or split. False if the wallet can't cover it or the turn moved on meanwhile. */
+  async extraStake(seat: Seat, amount: number, turn: { seat: number; hand: number }): Promise<string | null> {
+    this.busy = true;
+    try {
+      const res = await this.wallet("/internal/debit", { userId: this.userId(seat.playerId), amount, game: "blackjack", ref: this.name });
+      seat.stack = res.balance;
+      if (!res.ok) return "Not enough chips.";
+      const still = this.state.phase === "playing" && this.state.turn?.seat === turn.seat && this.state.turn.hand === turn.hand;
+      if (!still) {
+        const back = await this.wallet("/internal/credit", { userId: this.userId(seat.playerId), amount, game: "blackjack", ref: this.name });
+        seat.stack = back.balance;
+        return "Too late, your turn ran out.";
+      }
+      return null;
+    } catch {
+      return "Chips are unavailable right now. Try again.";
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  async play(action: "hit" | "stand" | "double" | "split", seatIndex: number | null): Promise<string | void> {
     const turn = this.state.turn;
     if (this.state.phase !== "playing" || !turn || turn.seat !== seatIndex) return "It's not your turn.";
+    if (this.busy) return "One moment…";
     const seat = this.state.seats[turn.seat]!;
     const hand = seat.hands[turn.hand];
 
@@ -359,7 +455,8 @@ export class Table extends Server<Env> {
     } else if (action === "double") {
       if (hand.cards.length !== 2) return "You can only double on your first two cards.";
       if (seat.stack < hand.bet) return "Not enough chips to double.";
-      seat.stack -= hand.bet;
+      const problem = await this.extraStake(seat, hand.bet, turn);
+      if (problem) return problem;
       hand.bet *= 2;
       hand.doubled = true;
       hand.cards.push(this.draw());
@@ -369,7 +466,8 @@ export class Table extends Server<Env> {
       if (seat.hands.length > 1) return "You can split once per round.";
       if (!canSplitCards(hand.cards)) return "Only pairs can be split.";
       if (seat.stack < hand.bet) return "Not enough chips to split.";
-      seat.stack -= hand.bet;
+      const problem = await this.extraStake(seat, hand.bet, turn);
+      if (problem) return problem;
       const aces = hand.cards[0].rank === "A";
       const second: Hand = { cards: [hand.cards.pop()!], bet: hand.bet, doubled: false, done: false, fromSplit: true };
       hand.fromSplit = true;
@@ -399,56 +497,47 @@ export class Table extends Server<Env> {
         this.broadcastState();
         this.setTimer(DEALER_STEP_MS, step);
       } else {
-        this.settle();
-        this.broadcastState();
+        void this.settle();
       }
     };
     this.broadcastState();
     this.setTimer(DEALER_STEP_MS, step);
   }
 
-  settle() {
+  async settle() {
     this.clearTimer();
     const dealerCards = this.state.dealer.cards;
     const dealerTotal = handValue(dealerCards).total;
     const dealerBJ = isBlackjack(dealerCards);
+    const payouts = new Map<Seat, number>();
 
     for (const seat of this.state.seats) {
       if (!seat) continue;
+      let payout = 0;
       for (const hand of seat.hands) {
         const total = handValue(hand.cards).total;
         const natural = isBlackjack(hand.cards) && !hand.fromSplit;
-        if (hand.result === "bust" || total > 21) {
-          hand.result = "bust";
-          hand.net = -hand.bet;
-        } else if (natural && !dealerBJ) {
-          const win = Math.floor(hand.bet * 1.5);
-          seat.stack += hand.bet + win;
-          hand.result = "blackjack";
-          hand.net = win;
-        } else if (dealerBJ) {
-          if (natural) {
-            seat.stack += hand.bet;
-            hand.result = "push";
-            hand.net = 0;
-          } else {
-            hand.result = "lose";
-            hand.net = -hand.bet;
-          }
-        } else if (dealerTotal > 21 || total > dealerTotal) {
-          seat.stack += hand.bet * 2;
-          hand.result = "win";
-          hand.net = hand.bet;
-        } else if (total === dealerTotal) {
-          seat.stack += hand.bet;
-          hand.result = "push";
-          hand.net = 0;
-        } else {
-          hand.result = "lose";
-          hand.net = -hand.bet;
-        }
+        if (hand.result === "bust" || total > 21) hand.result = "bust";
+        else if (natural && !dealerBJ) hand.result = "blackjack";
+        else if (dealerBJ) hand.result = natural ? "push" : "lose";
+        else if (dealerTotal > 21 || total > dealerTotal) hand.result = "win";
+        else if (total === dealerTotal) hand.result = "push";
+        else hand.result = "lose";
+
+        // Payout returns the stake plus winnings: 3:2 for blackjack, 1:1 for a win, the stake for a push.
+        const handPayout =
+          hand.result === "blackjack"
+            ? hand.bet + Math.floor(hand.bet * 1.5)
+            : hand.result === "win"
+              ? hand.bet * 2
+              : hand.result === "push"
+                ? hand.bet
+                : 0;
+        payout += handPayout;
+        hand.net = handPayout - hand.bet;
         hand.done = true;
       }
+      if (payout > 0) payouts.set(seat, payout);
     }
 
     this.state.phase = "settle";
@@ -459,6 +548,23 @@ export class Table extends Server<Env> {
       this.nextRound();
       this.broadcastState();
     });
+    this.broadcastState();
+
+    // Pay winners from the wallet; one retry, then log so it can be fixed by hand.
+    await Promise.all(
+      [...payouts].map(async ([seat, amount]) => {
+        const body = { userId: this.userId(seat.playerId), amount, game: "blackjack", ref: this.name };
+        for (let attempt = 0; attempt < 2; attempt++) {
+          try {
+            seat.stack = (await this.wallet("/internal/credit", body)).balance;
+            return;
+          } catch (error) {
+            if (attempt === 1) console.error("payout failed", body, error);
+          }
+        }
+      }),
+    );
+    this.broadcastState();
   }
 
   nextRound() {
@@ -481,7 +587,7 @@ export class Table extends Server<Env> {
   leave(playerId: string) {
     const seat = this.seatOf(playerId);
     if (seat === null) return;
-    const inRound = this.state.seats[seat]!.hands.length > 0 && (this.state.phase === "playing" || this.state.phase === "dealer");
+    const inRound = this.starting || (this.state.seats[seat]!.hands.length > 0 && (this.state.phase === "playing" || this.state.phase === "dealer" || this.state.phase === "settle"));
     if (inRound) {
       this.pendingLeave.add(playerId);
       if (this.state.turn?.seat === seat) {
@@ -505,7 +611,7 @@ export class Table extends Server<Env> {
       this.state.deadline = null;
     } else if (this.state.phase === "betting") {
       const seated = this.state.seats.filter((s): s is Seat => !!s && s.connected);
-      if (seated.length > 0 && seated.every((s) => s.ready)) this.startRound();
+      if (seated.length > 0 && seated.every((s) => s.ready)) void this.startRound();
     }
     this.notifyLobby();
   }
