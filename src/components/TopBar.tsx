@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { ArrowLeft, LogIn, LogOut } from "lucide-react";
 import { formatChips } from "../../shared/protocol";
 import { readChips } from "@/lib/identity";
-import { CASINO_URL } from "@/lib/supabase";
+import { CASINO_URL } from "@/lib/auth";
 import { useAuth } from "./AuthProvider";
 import { ChipIcon } from "./ChipIcon";
 

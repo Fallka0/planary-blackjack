@@ -117,21 +117,16 @@ export class Table extends Server<Env> {
   }
 
   async identify(token: string | null, pid: string | null, name: string | null): Promise<Identity> {
-    const url = this.env.SUPABASE_URL;
-    const key = this.env.SUPABASE_ANON_KEY;
-    if (token && url && key) {
+    if (token) {
       try {
-        const res = await fetch(`${url.replace(/\/+$/, "")}/auth/v1/user`, {
-          headers: { Authorization: `Bearer ${token}`, apikey: key },
+        // planary-auth verifies the token with its own Supabase keys.
+        const res = await fetch(`${this.env.AUTH_API_URL || "https://auth.planary.ch"}/api/auth/me`, {
+          headers: { Authorization: `Bearer ${token}` },
         });
         if (res.ok) {
-          const user = (await res.json()) as { id: string; email?: string; user_metadata?: { full_name?: string } };
-          if (user.id) {
-            return {
-              playerId: `u-${user.id}`,
-              name: cleanName(user.user_metadata?.full_name || user.email?.split("@")[0]),
-              verified: true,
-            };
+          const { user } = (await res.json()) as { user?: { id: string; email?: string } };
+          if (user?.id) {
+            return { playerId: `u-${user.id}`, name: cleanName(user.email?.split("@")[0]), verified: true };
           }
         }
       } catch {

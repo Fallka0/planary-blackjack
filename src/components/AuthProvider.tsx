@@ -1,7 +1,8 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
-import { buildAuthUrl, supabase } from "@/lib/supabase";
+import { absorbSessionFromHash, clearSession, loadSession, verifySession } from "@/lib/session";
+import { buildAuthUrl } from "@/lib/auth";
 
 export interface PlanaryUser {
   id: string;
@@ -12,7 +13,7 @@ interface AuthState {
   user: PlanaryUser | null;
   accessToken: string | null;
   loading: boolean;
-  /** Supabase isn't configured yet, so sign-in is unavailable and everyone plays as a guest. */
+  /** Sign-in is always available: it goes through planary-auth. */
   authAvailable: boolean;
   /** The id chips and seats are keyed by: the account when signed in, else the browser's guest id. */
   playerId: string | null;
@@ -22,17 +23,6 @@ interface AuthState {
 
 const AuthContext = createContext<AuthState | null>(null);
 
-// planary-auth redirects back with the session in the URL hash (#access_token=…&refresh_token=…).
-async function absorbSessionFromHash() {
-  if (!supabase) return;
-  const params = new URLSearchParams(window.location.hash.replace(/^#/, ""));
-  const accessToken = params.get("access_token");
-  const refreshToken = params.get("refresh_token");
-  if (!accessToken || !refreshToken) return;
-  await supabase.auth.setSession({ access_token: accessToken, refresh_token: refreshToken });
-  window.history.replaceState({}, document.title, `${window.location.pathname}${window.location.search}`);
-}
-
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<PlanaryUser | null>(null);
   const [accessToken, setAccessToken] = useState<string | null>(null);
@@ -41,34 +31,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     import("@/lib/identity").then(({ guestId }) => setGuest(guestId()));
-    const client = supabase;
-    if (!client) {
+    let active = true;
+    const session = absorbSessionFromHash() ?? loadSession();
+    if (!session) {
       setLoading(false);
       return;
     }
-    let active = true;
-
-    void (async () => {
-      try {
-        await absorbSessionFromHash();
-      } catch {
-        // Expired tokens in the hash: fall back to any stored session.
-      }
-      const { data } = await client.auth.getSession();
-      if (!active) return;
-      const session = data.session;
-      setUser(session?.user ? { id: session.user.id, email: session.user.email ?? "" } : null);
-      setAccessToken(session?.access_token ?? null);
-      setLoading(false);
-    })();
-
-    const { data } = client.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ? { id: session.user.id, email: session.user.email ?? "" } : null);
-      setAccessToken(session?.access_token ?? null);
+    // Show the player straight away, then drop the session if planary-auth rejects the token.
+    setUser({ id: session.userId, email: session.email });
+    setAccessToken(session.accessToken);
+    setLoading(false);
+    void verifySession(session).then((ok) => {
+      if (!active || ok) return;
+      clearSession();
+      setUser(null);
+      setAccessToken(null);
     });
+    // Sign out locally when the token expires.
+    const timer = window.setTimeout(() => {
+      clearSession();
+      setUser(null);
+      setAccessToken(null);
+    }, Math.max(0, session.expiresAt * 1000 - Date.now() - 60_000));
     return () => {
       active = false;
-      data.subscription.unsubscribe();
+      window.clearTimeout(timer);
     };
   }, []);
 
@@ -77,7 +64,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const signOut = useCallback(async () => {
-    await supabase?.auth.signOut();
+    clearSession();
     setUser(null);
     setAccessToken(null);
   }, []);
@@ -85,9 +72,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const playerId = user ? `u-${user.id}` : guest;
 
   return (
-    <AuthContext.Provider
-      value={{ user, accessToken, loading, authAvailable: Boolean(supabase), playerId, signIn, signOut }}
-    >
+    <AuthContext.Provider value={{ user, accessToken, loading, authAvailable: true, playerId, signIn, signOut }}>
       {children}
     </AuthContext.Provider>
   );

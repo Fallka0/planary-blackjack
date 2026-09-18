@@ -11,7 +11,6 @@
     "party:deploy": "wrangler deploy"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.116.0",
     "lucide-react": "^1.47.0",
     "next": "16.3.5",
     "partyserver": "^0.5.10",
