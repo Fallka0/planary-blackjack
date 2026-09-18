@@ -1,4 +1,5 @@
-import type * as Party from "partykit/server";
+import { type Connection, type ConnectionContext, getServerByName, Server, type WSMessage } from "partyserver";
+import type { Env } from "./env";
 import { type Card, canSplitCards, handValue, isBlackjack, RANKS, SUITS } from "../shared/cards";
 import {
   BETTING_MS,
@@ -51,8 +52,8 @@ function cleanName(raw: unknown) {
   return name || "Player";
 }
 
-export default class TableServer implements Party.Server {
-  state: TableState;
+export class Table extends Server<Env> {
+  state!: TableState;
   shoe: Card[] = freshShoe();
   timer: ReturnType<typeof setTimeout> | null = null;
   graceTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -61,10 +62,10 @@ export default class TableServer implements Party.Server {
   chat: ChatMessage[] = [];
   lastChatAt = new Map<string, number>();
 
-  constructor(readonly room: Party.Room) {
+  onStart() {
     this.state = {
-      id: room.id,
-      isPrivate: isPrivateTableId(room.id),
+      id: this.name,
+      isPrivate: isPrivateTableId(this.name),
       phase: "waiting",
       seats: Array.from({ length: SEATS }, () => null),
       dealer: { cards: [], holeHidden: false },
@@ -78,7 +79,7 @@ export default class TableServer implements Party.Server {
 
   // ── Connections ───────────────────────────────
 
-  async onConnect(conn: Party.Connection, ctx: Party.ConnectionContext) {
+  async onConnect(conn: Connection, ctx: ConnectionContext) {
     const url = new URL(ctx.request.url);
     const identity = await this.identify(url.searchParams.get("token"), url.searchParams.get("pid"), url.searchParams.get("name"));
     conn.setState(identity);
@@ -95,10 +96,10 @@ export default class TableServer implements Party.Server {
     this.broadcastState();
   }
 
-  onClose(conn: Party.Connection) {
+  onClose(conn: Connection) {
     const identity = conn.state as Identity | null;
     if (!identity) return;
-    const stillHere = [...this.room.getConnections<Identity>()].some(
+    const stillHere = [...this.getConnections<Identity>()].some(
       (c) => c.id !== conn.id && c.state?.playerId === identity.playerId,
     );
     if (stillHere) return;
@@ -116,8 +117,8 @@ export default class TableServer implements Party.Server {
   }
 
   async identify(token: string | null, pid: string | null, name: string | null): Promise<Identity> {
-    const url = this.room.env.SUPABASE_URL as string | undefined;
-    const key = this.room.env.SUPABASE_ANON_KEY as string | undefined;
+    const url = this.env.SUPABASE_URL;
+    const key = this.env.SUPABASE_ANON_KEY;
     if (token && url && key) {
       try {
         const res = await fetch(`${url.replace(/\/+$/, "")}/auth/v1/user`, {
@@ -143,7 +144,7 @@ export default class TableServer implements Party.Server {
 
   // ── Messages ──────────────────────────────────
 
-  onMessage(raw: string | ArrayBuffer | ArrayBufferView, sender: Party.Connection) {
+  onMessage(sender: Connection, raw: WSMessage) {
     const identity = sender.state as Identity | null;
     if (!identity || typeof raw !== "string") return;
     let msg: ClientMessage;
@@ -519,7 +520,7 @@ export default class TableServer implements Party.Server {
     const message: ChatMessage = { id: crypto.randomUUID(), at: Date.now(), ...entry };
     this.chat.push(message);
     if (this.chat.length > CHAT_HISTORY) this.chat.splice(0, this.chat.length - CHAT_HISTORY);
-    this.room.broadcast(JSON.stringify({ type: "chat", messages: [message], replace: false } satisfies ServerMessage));
+    this.broadcast(JSON.stringify({ type: "chat", messages: [message], replace: false } satisfies ServerMessage));
   }
 
   seatOf(playerId: string): number | null {
@@ -542,7 +543,7 @@ export default class TableServer implements Party.Server {
   }
 
   broadcastState() {
-    for (const conn of this.room.getConnections<Identity>()) {
+    for (const conn of this.getConnections<Identity>()) {
       const id = conn.state;
       if (!id) continue;
       const message: ServerMessage = {
@@ -570,12 +571,9 @@ export default class TableServer implements Party.Server {
   notifyLobby() {
     if (this.state.isPrivate) return;
     const seated = this.state.seats.filter(Boolean).length;
-    void this.room.context.parties.lobby
-      .get("main")
-      .fetch({
-        method: "POST",
-        body: JSON.stringify({ id: this.room.id, seated, phase: this.state.phase }),
-      })
+    const body = JSON.stringify({ id: this.name, seated, phase: this.state.phase });
+    void getServerByName(this.env.Lobby, "main")
+      .then((lobby) => lobby.fetch(new Request("https://lobby.internal/", { method: "POST", body })))
       .catch(() => {});
   }
 }

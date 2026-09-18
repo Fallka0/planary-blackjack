@@ -1,4 +1,5 @@
-import type * as Party from "partykit/server";
+import { type Connection, Server } from "partyserver";
+import type { Env } from "./env";
 import { type LobbyMessage, type LobbyTable, SEATS } from "../shared/protocol";
 
 const CORS = {
@@ -15,24 +16,22 @@ function newTableId(prefix: "t" | "p") {
 }
 
 /** One lobby room ("main") that tracks public tables and hands out quick seats. */
-export default class LobbyServer implements Party.Server {
+export class Lobby extends Server<Env> {
   tables = new Map<string, LobbyTable>();
-
-  constructor(readonly room: Party.Room) {}
 
   list(): LobbyTable[] {
     return [...this.tables.values()].sort((a, b) => b.seated - a.seated || b.updatedAt - a.updatedAt);
   }
 
-  broadcast() {
-    this.room.broadcast(JSON.stringify({ type: "tables", tables: this.list() } satisfies LobbyMessage));
+  publish() {
+    this.broadcast(JSON.stringify({ type: "tables", tables: this.list() } satisfies LobbyMessage));
   }
 
-  onConnect(conn: Party.Connection) {
+  onConnect(conn: Connection) {
     conn.send(JSON.stringify({ type: "tables", tables: this.list() } satisfies LobbyMessage));
   }
 
-  async onRequest(req: Party.Request) {
+  async onRequest(req: Request) {
     if (req.method === "OPTIONS") return new Response(null, { headers: CORS });
     const url = new URL(req.url);
 
@@ -42,7 +41,7 @@ export default class LobbyServer implements Party.Server {
       const seated = Math.max(0, Math.min(SEATS, Number(body.seated) || 0));
       if (seated === 0) this.tables.delete(body.id);
       else this.tables.set(body.id, { id: body.id, seated, phase: body.phase ?? "betting", updatedAt: Date.now() });
-      this.broadcast();
+      this.publish();
       return new Response("ok", { headers: CORS });
     }
 

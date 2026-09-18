@@ -22,6 +22,7 @@ export function useTable(tableId: string) {
     if (loading || !playerId) return;
     const socket = new PartySocket({
       host: PARTY_HOST,
+      party: "table",
       room: tableId,
       query: () => ({
         token: accessToken ?? "",
