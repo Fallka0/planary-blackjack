@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Check, Copy, LogOut, MessageCircle, WifiOff } from "lucide-react";
+import { Check, CircleHelp, Copy, LogOut, MessageCircle, WifiOff } from "lucide-react";
 import { canSplitCards, formatTotal, handValue } from "../../../../shared/cards";
 import {
   CHIP_VALUES,
@@ -16,7 +16,10 @@ import {
 import { Chat } from "@/components/Chat";
 import { ChipIcon, chipBreakdown } from "@/components/ChipIcon";
 import { PlayingCard } from "@/components/PlayingCard";
+import { Shoe, ShuffleShow } from "@/components/Shoe";
 import { TopBar } from "@/components/TopBar";
+import { Tutorial, useTutorial } from "@/components/Tutorial";
+import { BLACKJACK_TOUR } from "@/lib/tutorial";
 import { useWallet } from "@/components/WalletProvider";
 import { CASINO_URL } from "@/lib/auth";
 import { useTable } from "@/lib/useTable";
@@ -180,6 +183,8 @@ function statusLine(state: TableState, mySeat: number | null, now: number) {
   switch (state.phase) {
     case "waiting":
       return "Take a seat to start";
+    case "shuffle":
+      return "Shuffling a new shoe";
     case "betting":
       return secs !== null ? `Place your bets · ${secs}s` : "Place your bets";
     case "playing": {
@@ -215,6 +220,14 @@ function Dock({
     return (
       <div className="dock">
         <p className="dock-note">{open ? "Pick an open seat to play. You can watch until then." : "The table is full. You're watching."}</p>
+      </div>
+    );
+  }
+
+  if (state.phase === "shuffle") {
+    return (
+      <div className="dock">
+        <p className="dock-note">The dealer is shuffling six decks into a new shoe. Betting opens in a moment.</p>
       </div>
     );
   }
@@ -330,6 +343,7 @@ export function Table({ id }: { id: string }) {
   const [copied, setCopied] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
   const [seenChat, setSeenChat] = useState(0);
+  const tour = useTutorial("blackjack");
   const unread = chatOpen ? 0 : chat.filter((m) => m.name !== null).length - seenChat;
 
   useEffect(() => {
@@ -359,6 +373,9 @@ export function Table({ id }: { id: string }) {
       <button className="icon-btn" onClick={copyLink} aria-label="Copy table link">
         {copied ? <Check size={16} strokeWidth={2.4} aria-hidden="true" /> : <Copy size={16} strokeWidth={2} aria-hidden="true" />}
       </button>
+      <button className="icon-btn" onClick={tour.show} aria-label="How to play">
+        <CircleHelp size={17} strokeWidth={2} aria-hidden="true" />
+      </button>
       <button
         className="icon-btn chat-toggle"
         onClick={() => setChatOpen((v) => !v)}
@@ -369,9 +386,9 @@ export function Table({ id }: { id: string }) {
         {unread > 0 ? <span className="badge">{unread > 9 ? "9+" : unread}</span> : null}
       </button>
       {seat ? (
-        <button className="btn btn-quiet btn-sm" onClick={() => send({ type: "leave" })}>
+        <button className="btn btn-quiet btn-sm leave-btn" onClick={() => send({ type: "leave" })} aria-label="Leave seat">
           <LogOut size={15} strokeWidth={2} aria-hidden="true" />
-          Leave seat
+          <span className="leave-label">Leave seat</span>
         </button>
       ) : null}
     </div>
@@ -383,7 +400,7 @@ export function Table({ id }: { id: string }) {
 
       <main className={`table-main${chatOpen ? " chat-is-open" : ""}`}>
         <div className="play">
-        <section className="felt" aria-label="Blackjack table">
+        <section className={`felt${state?.phase === "shuffle" ? " is-shuffling" : ""}`} aria-label="Blackjack table">
           <div className="felt-print" aria-hidden="true">
             <span className="print-21 plate-a">21</span>
             <span className="print-21 plate-b">21</span>
@@ -393,17 +410,7 @@ export function Table({ id }: { id: string }) {
             <>
               <div className="felt-top">
                 <Dealer state={state} />
-                <div className="shoe" aria-label={`Shoe: ${state.shoeRemaining} cards left`}>
-                  <span className="shoe-cards" aria-hidden="true">
-                    <span />
-                    <span />
-                    <span />
-                  </span>
-                  <span className="shoe-meter" aria-hidden="true">
-                    <span style={{ width: `${(state.shoeRemaining / state.shoeSize) * 100}%` }} />
-                  </span>
-                  <span className="shoe-label">Shoe</span>
-                </div>
+                <Shoe state={state} />
               </div>
 
               <div className="felt-rules" aria-hidden="true">
@@ -418,6 +425,8 @@ export function Table({ id }: { id: string }) {
                   </text>
                 </svg>
               </div>
+
+              {state.phase === "shuffle" ? <ShuffleShow key={state.round} /> : null}
 
               <p className="status" aria-live="polite">
                 {statusLine(state, mySeat, now)}
@@ -469,6 +478,7 @@ export function Table({ id }: { id: string }) {
         />
       </main>
 
+      {tour.open && state ? <Tutorial steps={BLACKJACK_TOUR} onClose={tour.close} /> : null}
       {status === "closed" && state ? (
         <div className="toast toast-warn" role="status">
           <WifiOff size={16} strokeWidth={2} aria-hidden="true" /> Connection lost. Reconnecting…

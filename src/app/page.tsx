@@ -8,12 +8,15 @@ import { type LobbyMessage, type LobbyTable, MIN_BET, SEATS } from "../../shared
 import { useAuth } from "@/components/AuthProvider";
 import { Poster } from "@/components/Poster";
 import { TopBar } from "@/components/TopBar";
+import { Tutorial, useTutorial } from "@/components/Tutorial";
+import { BLACKJACK_TOUR } from "@/lib/tutorial";
 import { useWallet } from "@/components/WalletProvider";
 import { CASINO_URL } from "@/lib/auth";
 import { lobbyRequest, PARTY_HOST, parseTableCode } from "@/lib/party";
 
 const PHASE_LABEL: Record<LobbyTable["phase"], string> = {
   waiting: "Waiting",
+  shuffle: "Shuffling",
   betting: "Taking bets",
   insurance: "Insurance",
   playing: "Hand in play",
@@ -66,10 +69,12 @@ export default function Lobby() {
   }
 
   const broke = chips !== null && chips < MIN_BET;
+  const tour = useTutorial("blackjack", false);
 
   return (
     <div className="app">
       <TopBar />
+      {tour.open ? <Tutorial steps={BLACKJACK_TOUR} onClose={tour.close} /> : null}
       <main className="lobby">
         <section className="lobby-hero" aria-labelledby="lobby-title">
           <div className="lobby-art" aria-hidden="true">
@@ -78,11 +83,15 @@ export default function Lobby() {
           <div className="lobby-copy">
             <h1 id="lobby-title">Blackjack</h1>
             <p className="lobby-lead">
-              Up to five players against one dealer. Six-deck shoe, dealer stands on soft 17, blackjack pays 3 to 2.
+              Up to five players against one dealer. Six-deck shoe, dealer stands on soft 17, blackjack pays 3 to 2, insurance 2 to 1.
             </p>
 
             <p className="who">
-              Playing as <strong>{user.name}</strong>
+              Playing as <strong>{user.name}</strong> ·{" "}
+              <button className="link-btn" onClick={tour.show}>
+                How to play
+              </button>{" "}
+              · <a href={`${CASINO_URL}/rules#blackjack`}>Rules &amp; odds</a>
             </p>
 
             {broke ? (

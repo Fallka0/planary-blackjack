@@ -19,12 +19,12 @@ import {
   SEATS,
   type ServerMessage,
   SETTLE_MS,
+  SHUFFLE_MS,
   type TableState,
   TURN_MS,
 } from "../shared/protocol";
 
 const DECKS = 6;
-const RESHUFFLE_BELOW = 0.25;
 const DEALER_STEP_MS = 750;
 
 interface Identity {
@@ -42,6 +42,11 @@ function freshShoe(): Card[] {
     [cards[i], cards[j]] = [cards[j], cards[i]];
   }
   return cards;
+}
+
+/** Where the dealer puts the cut card: 60–80 cards from the back, so 74–81% of the shoe is dealt. */
+function cutPosition() {
+  return 60 + randomBelow(21);
 }
 
 /** Uniform integer in [0, n). Rejection sampling, so no value is favoured by the modulo. */
@@ -65,6 +70,8 @@ function cleanName(raw: unknown) {
 export class Table extends Server<Env> {
   state!: TableState;
   shoe: Card[] = freshShoe();
+  /** A brand-new table shuffles in front of the first player who sits down. */
+  needsShuffle = true;
   timer: ReturnType<typeof setTimeout> | null = null;
   graceTimers = new Map<string, ReturnType<typeof setTimeout>>();
   /** Players who asked to leave (or dropped) mid-round; removed at the end of it. */
@@ -87,6 +94,8 @@ export class Table extends Server<Env> {
       deadline: null,
       shoeRemaining: this.shoe.length,
       shoeSize: DECKS * 52,
+      cutCard: cutPosition(),
+      cutCardOut: false,
       round: 1,
     };
   }
@@ -238,8 +247,11 @@ export class Table extends Server<Env> {
           connected: true,
           insurance: 0,
         };
-        if (this.state.phase === "waiting") this.state.phase = "betting";
         this.postChat({ name: null, playerId: null, text: `${this.state.seats[index]!.name} sat down at seat ${index + 1}.` });
+        if (this.state.phase === "waiting") {
+          if (this.needsShuffle || this.state.cutCardOut) this.startShuffle();
+          else this.state.phase = "betting";
+        }
         this.notifyLobby();
         return;
       }
@@ -309,9 +321,14 @@ export class Table extends Server<Env> {
   }
 
   draw(): Card {
+    // Only a very long round can run the shoe dry after the cut card; a real dealer would shuffle the discards.
     if (this.shoe.length === 0) this.shoe = freshShoe();
     const card = this.shoe.pop()!;
     this.state.shoeRemaining = this.shoe.length;
+    if (!this.state.cutCardOut && this.shoe.length < this.state.cutCard) {
+      this.state.cutCardOut = true;
+      this.postChat({ name: null, playerId: null, text: "The cut card is out. New shoe after this round." });
+    }
     return card;
   }
 
@@ -361,11 +378,6 @@ export class Table extends Server<Env> {
   }
 
   deal(players: Seat[]) {
-    if (this.shoe.length < DECKS * 52 * RESHUFFLE_BELOW) {
-      this.shoe = freshShoe();
-      this.state.shoeRemaining = this.shoe.length;
-    }
-
     for (const seat of this.state.seats) {
       if (!seat) continue;
       if (players.includes(seat)) {
@@ -652,6 +664,33 @@ export class Table extends Server<Env> {
     this.state.deadline = null;
     this.state.round += 1;
     this.state.phase = this.state.seats.some(Boolean) ? "betting" : "waiting";
+    if (this.state.cutCardOut) {
+      if (this.state.phase === "betting") this.startShuffle();
+      else this.newShoe();
+    }
+  }
+
+  /** Six fresh decks and a new cut card. */
+  newShoe() {
+    this.shoe = freshShoe();
+    this.needsShuffle = false;
+    this.state.shoeRemaining = this.shoe.length;
+    this.state.cutCard = cutPosition();
+    this.state.cutCardOut = false;
+  }
+
+  /** The dealer shuffles at the table; betting opens when they're done. */
+  startShuffle() {
+    this.newShoe();
+    this.state.phase = "shuffle";
+    this.state.deadline = Date.now() + SHUFFLE_MS;
+    this.postChat({ name: null, playerId: null, text: "The dealer is shuffling a new six-deck shoe." });
+    this.setTimer(SHUFFLE_MS, () => {
+      this.state.phase = this.state.seats.some(Boolean) ? "betting" : "waiting";
+      this.state.deadline = null;
+      this.broadcastState();
+      this.notifyLobby();
+    });
   }
 
   leave(playerId: string) {
