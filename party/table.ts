@@ -165,7 +165,10 @@ export class Table extends Server<Env> {
   // ── Wallet (planary-casino-api) ───────────────
 
   /** Chips live in the casino wallet; the table only moves them, worker to worker. */
-  async wallet(path: string, body: Record<string, unknown>): Promise<{ ok?: boolean; balance: number } & Partial<PlayerLook>> {
+  async wallet(
+    path: string,
+    body: Record<string, unknown>,
+  ): Promise<{ ok?: boolean; balance: number; reason?: string; blocked?: string | null; muted?: boolean } & Partial<PlayerLook>> {
     const res = await this.env.CASINO.fetch(
       new Request(`https://casino.internal${path}`, {
         method: "POST",
@@ -175,6 +178,20 @@ export class Table extends Server<Env> {
     );
     if (!res.ok) throw new Error(`wallet ${path} → ${res.status}`);
     return res.json();
+  }
+
+  /** Chat mutes come from the casino; remembered for a minute per player. */
+  muted = new Map<string, { value: boolean; at: number }>();
+  async isMuted(playerId: string) {
+    const known = this.muted.get(playerId);
+    if (known && Date.now() - known.at < 60_000) return known.value;
+    try {
+      const res = await this.wallet("/internal/status", { userId: this.userId(playerId) });
+      this.muted.set(playerId, { value: Boolean(res.muted), at: Date.now() });
+      return Boolean(res.muted);
+    } catch {
+      return false;
+    }
   }
 
   /** Any other call to the casino API. */
@@ -223,6 +240,7 @@ export class Table extends Server<Env> {
           .trim()
           .slice(0, CHAT_MAX_LENGTH);
         if (!text) return;
+        if (await this.isMuted(who.playerId)) return "Chat is paused on your account for now.";
         const last = this.lastChatAt.get(who.playerId) ?? 0;
         if (Date.now() - last < 700) return "Slow down a little.";
         this.lastChatAt.set(who.playerId, Date.now());
@@ -238,6 +256,8 @@ export class Table extends Server<Env> {
         let look: PlayerLook;
         try {
           const res = await this.wallet("/internal/wallet", { userId: this.userId(who.playerId), name: who.name });
+          if (res.blocked) return res.blocked;
+          this.muted.set(who.playerId, { value: Boolean(res.muted), at: Date.now() });
           stack = res.balance;
           look = { avatar: res.avatar ?? null, border: res.border ?? null, title: res.title ?? null, chipset: res.chipset ?? null };
         } catch {
@@ -363,7 +383,7 @@ export class Table extends Server<Env> {
             });
             seat.stack = res.balance;
             if (res.ok) players.push(seat);
-            else this.tell(seat.playerId, "Not enough chips for that bet, so you sit this round out.");
+            else this.tell(seat.playerId, res.reason ? `${res.reason} You sit this round out.` : "Not enough chips for that bet, so you sit this round out.");
           } catch {
             this.tell(seat.playerId, "Chips are unavailable right now, so you sit this round out.");
           }
@@ -445,7 +465,7 @@ export class Table extends Server<Env> {
             const res = await this.wallet("/internal/debit", { userId: this.userId(seat.playerId), amount: cost, game: "blackjack", ref: this.name });
             seat.stack = res.balance;
             if (res.ok) seat.insurance = cost;
-            else this.tell(seat.playerId, "Not enough chips for insurance.");
+            else this.tell(seat.playerId, res.reason ?? "Not enough chips for insurance.");
           } catch {
             this.tell(seat.playerId, "Chips are unavailable right now, so no insurance this hand.");
           }
@@ -509,7 +529,7 @@ export class Table extends Server<Env> {
     try {
       const res = await this.wallet("/internal/debit", { userId: this.userId(seat.playerId), amount, game: "blackjack", ref: this.name });
       seat.stack = res.balance;
-      if (!res.ok) return "Not enough chips.";
+      if (!res.ok) return res.reason ?? "Not enough chips.";
       const still = this.state.phase === "playing" && this.state.turn?.seat === turn.seat && this.state.turn.hand === turn.hand;
       if (!still) {
         const back = await this.wallet("/internal/credit", { userId: this.userId(seat.playerId), amount, game: "blackjack", ref: this.name });
