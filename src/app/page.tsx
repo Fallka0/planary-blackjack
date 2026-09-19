@@ -15,6 +15,7 @@ import { lobbyRequest, PARTY_HOST, parseTableCode } from "@/lib/party";
 const PHASE_LABEL: Record<LobbyTable["phase"], string> = {
   waiting: "Waiting",
   betting: "Taking bets",
+  insurance: "Insurance",
   playing: "Hand in play",
   dealer: "Dealer drawing",
   settle: "Paying out",

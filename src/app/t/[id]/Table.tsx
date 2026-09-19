@@ -8,6 +8,7 @@ import {
   formatChips,
   type Hand,
   MAX_BET,
+  MAX_HANDS,
   MIN_BET,
   type Seat,
   type TableState,
@@ -187,6 +188,8 @@ function statusLine(state: TableState, mySeat: number | null, now: number) {
       const who = state.turn.seat === mySeat ? "Your turn" : `${seat?.name ?? "Player"} is deciding`;
       return secs !== null ? `${who} · ${secs}s` : who;
     }
+    case "insurance":
+      return secs !== null ? `Dealer shows an ace · Insurance? ${secs}s` : "Dealer shows an ace";
     case "dealer":
       return "Dealer draws";
     case "settle":
@@ -237,9 +240,9 @@ function Dock({
           <span className="dock-bet">
             Bet <strong>{formatChips(seat.bet)}</strong>
           </span>
-          {seat.bet === 0 && seat.lastBet >= MIN_BET ? (
+          {seat.bet === 0 && seat.lastBet >= MIN_BET && seat.stack >= MIN_BET ? (
             <button className="btn btn-ink" onClick={() => send({ type: "rebet" })}>
-              Rebet {formatChips(Math.min(seat.lastBet, seat.stack))}
+              Rebet {formatChips(Math.floor(Math.min(seat.lastBet, seat.stack, MAX_BET) / 10) * 10)}
             </button>
           ) : (
             <button className="btn btn-ink" onClick={() => send({ type: "clearBet" })} disabled={seat.bet === 0 || seat.ready}>
@@ -254,11 +257,39 @@ function Dock({
     );
   }
 
+  if (state.phase === "insurance" && seat.hands.length > 0) {
+    const cost = seat.hands[0].bet / 2;
+    const hasBlackjack = handValue(seat.hands[0].cards).total === 21;
+    if (seat.insurance === null) {
+      return (
+        <div className="dock dock-turn">
+          <p className="dock-note">
+            {hasBlackjack ? "You have blackjack. Take even money?" : `Insurance costs ${formatChips(cost)} and pays 2:1 if the dealer has blackjack.`}
+          </p>
+          <div className="dock-actions">
+            <button className="btn btn-paper btn-lg" onClick={() => send({ type: "insurance", take: true })} disabled={seat.stack < cost}>
+              {hasBlackjack ? "Even money" : "Insure"}
+            </button>
+            <button className="btn btn-ink btn-lg" onClick={() => send({ type: "insurance", take: false })}>
+              No thanks
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return (
+      <div className="dock">
+        <p className="dock-note">{seat.insurance > 0 ? `Insured for ${formatChips(seat.insurance)}. Waiting for the others.` : "No insurance. Waiting for the others."}</p>
+      </div>
+    );
+  }
+
   const myTurn = state.phase === "playing" && state.turn?.seat === mySeat;
   if (myTurn && state.turn) {
     const hand = seat.hands[state.turn.hand];
     const canDouble = hand.cards.length === 2 && seat.stack >= hand.bet;
-    const canSplit = seat.hands.length === 1 && canSplitCards(hand.cards) && seat.stack >= hand.bet;
+    const canSplit =
+      seat.hands.length < MAX_HANDS && canSplitCards(hand.cards) && !(hand.fromSplit && hand.cards[0].rank === "A") && seat.stack >= hand.bet;
     return (
       <div className="dock dock-turn">
         <div className="dock-actions">

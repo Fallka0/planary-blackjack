@@ -9,8 +9,10 @@ import {
   CHIP_VALUES,
   type ClientMessage,
   type Hand,
+  INSURANCE_MS,
   isPrivateTableId,
   MAX_BET,
+  MAX_HANDS,
   MIN_BET,
   RECONNECT_GRACE_MS,
   type Seat,
@@ -34,14 +36,22 @@ interface Identity {
 function freshShoe(): Card[] {
   const cards: Card[] = [];
   for (let d = 0; d < DECKS; d++) for (const suit of SUITS) for (const rank of RANKS) cards.push({ rank, suit });
-  // Fisher–Yates with a cryptographic source.
-  const rand = new Uint32Array(cards.length);
-  crypto.getRandomValues(rand);
+  // Fisher–Yates with a cryptographic source; every order of the shoe is equally likely.
   for (let i = cards.length - 1; i > 0; i--) {
-    const j = rand[i] % (i + 1);
+    const j = randomBelow(i + 1);
     [cards[i], cards[j]] = [cards[j], cards[i]];
   }
   return cards;
+}
+
+/** Uniform integer in [0, n). Rejection sampling, so no value is favoured by the modulo. */
+function randomBelow(n: number): number {
+  const buf = new Uint32Array(1);
+  const limit = Math.floor(0x1_0000_0000 / n) * n;
+  for (;;) {
+    crypto.getRandomValues(buf);
+    if (buf[0] < limit) return buf[0] % n;
+  }
 }
 
 function cleanName(raw: unknown) {
@@ -226,6 +236,7 @@ export class Table extends Server<Env> {
           hands: [],
           activeHand: 0,
           connected: true,
+          insurance: 0,
         };
         if (this.state.phase === "waiting") this.state.phase = "betting";
         this.postChat({ name: null, playerId: null, text: `${this.state.seats[index]!.name} sat down at seat ${index + 1}.` });
@@ -255,7 +266,8 @@ export class Table extends Server<Env> {
         return;
       case "rebet": {
         if (!seat || this.state.phase !== "betting" || this.starting) return;
-        const amount = Math.min(seat.lastBet, seat.stack, MAX_BET);
+        // Whole tens, so 3:2 blackjack and half-bet insurance always come out in whole chips.
+        const amount = Math.floor(Math.min(seat.lastBet, seat.stack, MAX_BET) / 10) * 10;
         if (amount < MIN_BET) return "No previous bet to repeat.";
         seat.bet = amount;
         seat.ready = false;
@@ -269,6 +281,15 @@ export class Table extends Server<Env> {
         this.startBettingClock();
         const seated = this.state.seats.filter((s): s is Seat => !!s && s.connected);
         if (seated.every((s) => s.ready)) void this.startRound();
+        return;
+      }
+      case "insurance": {
+        if (!seat || this.state.phase !== "insurance" || seat.hands.length === 0 || seat.insurance !== null) return;
+        const cost = seat.hands[0].bet / 2;
+        if (msg.take && seat.stack < cost) return "Not enough chips for insurance.";
+        seat.insurance = msg.take ? cost : 0;
+        const undecided = this.state.seats.some((s) => s && s.hands.length > 0 && s.insurance === null);
+        if (!undecided) void this.closeInsurance();
         return;
       }
       case "hit":
@@ -353,6 +374,7 @@ export class Table extends Server<Env> {
       } else {
         seat.hands = [];
       }
+      seat.insurance = 0;
       seat.bet = 0;
       seat.ready = false;
       seat.activeHand = 0;
@@ -370,7 +392,51 @@ export class Table extends Server<Env> {
       if (isBlackjack(seat.hands[0].cards)) seat.hands[0].done = true;
     }
 
-    // Dealer peeks for blackjack when showing an ace or a ten.
+    // Dealer shows an ace: everyone in the hand may insure for half their bet before the peek.
+    if (dealer.cards[0].rank === "A") {
+      for (const seat of players) seat.insurance = null;
+      this.state.phase = "insurance";
+      this.state.turn = null;
+      this.state.deadline = Date.now() + INSURANCE_MS;
+      this.setTimer(INSURANCE_MS, () => void this.closeInsurance());
+      return;
+    }
+    this.peek();
+  }
+
+  /** Takes the insurance stakes from the wallet (undecided counts as no), then peeks. */
+  async closeInsurance() {
+    if (this.state.phase !== "insurance" || this.busy) return;
+    this.busy = true;
+    this.clearTimer();
+    this.state.deadline = null;
+    try {
+      await Promise.all(
+        this.state.seats.map(async (seat) => {
+          if (!seat) return;
+          const cost = seat.insurance ?? 0;
+          seat.insurance = 0;
+          if (cost <= 0 || seat.hands.length === 0) return;
+          try {
+            const res = await this.wallet("/internal/debit", { userId: this.userId(seat.playerId), amount: cost, game: "blackjack", ref: this.name });
+            seat.stack = res.balance;
+            if (res.ok) seat.insurance = cost;
+            else this.tell(seat.playerId, "Not enough chips for insurance.");
+          } catch {
+            this.tell(seat.playerId, "Chips are unavailable right now, so no insurance this hand.");
+          }
+        }),
+      );
+    } finally {
+      this.busy = false;
+    }
+    this.peek();
+    this.broadcastState();
+  }
+
+  /** Dealer checks the hole card for blackjack when showing an ace or a ten; a dealer blackjack ends the hand at once. */
+  peek() {
+    const dealer = this.state.dealer;
     const up = handValue([dealer.cards[0]]).total;
     if ((up === 10 || up === 11) && isBlackjack(dealer.cards)) {
       dealer.holeHidden = false;
@@ -463,8 +529,9 @@ export class Table extends Server<Env> {
       hand.done = true;
       if (handValue(hand.cards).total > 21) hand.result = "bust";
     } else if (action === "split") {
-      if (seat.hands.length > 1) return "You can split once per round.";
       if (!canSplitCards(hand.cards)) return "Only pairs can be split.";
+      if (seat.hands.length >= MAX_HANDS) return `You can split up to ${MAX_HANDS} hands.`;
+      if (hand.fromSplit && hand.cards[0].rank === "A") return "Split aces can't be split again.";
       if (seat.stack < hand.bet) return "Not enough chips to split.";
       const problem = await this.extraStake(seat, hand.bet, turn);
       if (problem) return problem;
@@ -473,8 +540,8 @@ export class Table extends Server<Env> {
       hand.fromSplit = true;
       hand.cards.push(this.draw());
       second.cards.push(this.draw());
-      seat.hands.push(second);
-      for (const h of seat.hands) {
+      seat.hands.splice(turn.hand + 1, 0, second);
+      for (const h of [hand, second]) {
         // Split aces get one card each; any split hand on 21 is finished.
         if (aces || handValue(h.cards).total === 21) h.done = true;
       }
@@ -537,6 +604,8 @@ export class Table extends Server<Env> {
         hand.net = handPayout - hand.bet;
         hand.done = true;
       }
+      // Insurance pays 2:1 when the dealer has blackjack; the stake comes back on top.
+      if (dealerBJ && seat.insurance) payout += seat.insurance * 3;
       if (payout > 0) payouts.set(seat, payout);
     }
 
@@ -576,6 +645,7 @@ export class Table extends Server<Env> {
       seat.activeHand = 0;
       seat.bet = 0;
       seat.ready = false;
+      seat.insurance = 0;
     }
     this.state.dealer = { cards: [], holeHidden: false };
     this.state.turn = null;
@@ -587,7 +657,7 @@ export class Table extends Server<Env> {
   leave(playerId: string) {
     const seat = this.seatOf(playerId);
     if (seat === null) return;
-    const inRound = this.starting || (this.state.seats[seat]!.hands.length > 0 && (this.state.phase === "playing" || this.state.phase === "dealer" || this.state.phase === "settle"));
+    const inRound = this.starting || (this.state.seats[seat]!.hands.length > 0 && (this.state.phase === "insurance" || this.state.phase === "playing" || this.state.phase === "dealer" || this.state.phase === "settle"));
     if (inRound) {
       this.pendingLeave.add(playerId);
       if (this.state.turn?.seat === seat) {

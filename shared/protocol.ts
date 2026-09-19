@@ -8,12 +8,15 @@ export const CHIP_VALUES = [10, 50, 100, 500] as const;
 
 export const BETTING_MS = 15_000;
 export const TURN_MS = 20_000;
+export const INSURANCE_MS = 10_000;
+/** Most hands a player can hold after re-splitting. */
+export const MAX_HANDS = 4;
 export const SETTLE_MS = 5_000;
 export const RECONNECT_GRACE_MS = 30_000;
 export const CHAT_MAX_LENGTH = 200;
 export const CHAT_HISTORY = 60;
 
-export type Phase = "waiting" | "betting" | "playing" | "dealer" | "settle";
+export type Phase = "waiting" | "betting" | "insurance" | "playing" | "dealer" | "settle";
 
 export type HandResult = "blackjack" | "win" | "push" | "lose" | "bust";
 
@@ -40,6 +43,8 @@ export interface Seat {
   hands: Hand[];
   activeHand: number;
   connected: boolean;
+  /** Insurance stake this round (half the bet), 0 if none. Null while still undecided in the insurance phase. */
+  insurance: number | null;
 }
 
 export interface TableState {
@@ -67,6 +72,7 @@ export type ClientMessage =
   | { type: "stand" }
   | { type: "double" }
   | { type: "split" }
+  | { type: "insurance"; take: boolean }
   | { type: "chat"; text: string };
 
 export interface ChatMessage {
