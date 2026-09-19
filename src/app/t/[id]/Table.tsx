@@ -20,7 +20,7 @@ import { Shoe, ShuffleShow } from "@/components/Shoe";
 import { TopBar } from "@/components/TopBar";
 import { Tutorial, useTutorial } from "@/components/Tutorial";
 import { BLACKJACK_TOUR } from "@/lib/tutorial";
-import { useWallet } from "@/components/WalletProvider";
+import { CASINO_API, useWallet } from "@/components/WalletProvider";
 import { CASINO_URL } from "@/lib/auth";
 import { useTable } from "@/lib/useTable";
 
@@ -51,7 +51,7 @@ const RESULT_LABEL: Record<NonNullable<Hand["result"]>, string> = {
   bust: "Bust",
 };
 
-function ChipStack({ amount }: { amount: number }) {
+function ChipStack({ amount, set }: { amount: number; set: string | null }) {
   if (amount <= 0) return null;
   const chips = chipBreakdown(amount);
   return (
@@ -59,7 +59,7 @@ function ChipStack({ amount }: { amount: number }) {
       <span className="bet-stack" aria-hidden="true">
         {chips.map((value, i) => (
           <span key={i} className="bet-chip" style={{ bottom: `${i * 4}px` }}>
-            <ChipIcon size={30} value={value} />
+            <ChipIcon size={30} value={value} set={set} />
           </span>
         ))}
       </span>
@@ -130,13 +130,16 @@ function SeatView({
           <HandView key={h} hand={hand} active={isTurn && state.turn?.hand === h && seat.hands.length > 1} seatOrder={index} />
         ))}
       </div>
-      <ChipStack amount={betShown} />
+      <ChipStack amount={betShown} set={seat.look?.chipset ?? null} />
       {state.phase === "betting" && seat.ready ? <span className="ready">Ready</span> : null}
       <div className="plate">
         <span className="avatar" style={{ "--p": progress } as React.CSSProperties} aria-hidden="true">
-          <span>{initials(seat.name)}</span>
+          <span className={seat.look?.border ? `ring ${seat.look.border}` : undefined}>
+            {seat.look?.avatar ? <img src={CASINO_API + seat.look.avatar} alt="" width={34} height={34} /> : initials(seat.name)}
+          </span>
         </span>
         <span className="plate-copy">
+          {seat.look?.title ? <span className="plate-title">{seat.look.title}</span> : null}
           <span className="plate-name">
             {mine ? "You" : seat.name}
           </span>
@@ -338,7 +341,7 @@ function Dock({
 }
 
 export function Table({ id }: { id: string }) {
-  const { balance } = useWallet();
+  const { balance, cardback } = useWallet();
   const { state, you, status, error, chat, send } = useTable(id);
   const [copied, setCopied] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
@@ -395,7 +398,7 @@ export function Table({ id }: { id: string }) {
   );
 
   return (
-    <div className="app app-table">
+    <div className={`app app-table${cardback ? ` ${cardback}` : ""}`}>
       <TopBar>{tableInfo}</TopBar>
 
       <main className={`table-main${chatOpen ? " chat-is-open" : ""}`}>

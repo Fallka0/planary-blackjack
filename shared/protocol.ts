@@ -33,9 +33,19 @@ export interface Hand {
   net?: number;
 }
 
+/** How a player looks at the table, from their Planary Casino profile and shop items. */
+export interface PlayerLook {
+  /** Path on the casino API, or null for initials. */
+  avatar: string | null;
+  border: string | null;
+  title: string | null;
+  chipset: string | null;
+}
+
 export interface Seat {
   playerId: string;
   name: string;
+  look: PlayerLook;
   stack: number;
   /** Chips placed for the next round (betting phase). */
   bet: number;

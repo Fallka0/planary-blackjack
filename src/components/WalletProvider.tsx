@@ -9,6 +9,8 @@ export const CASINO_API = process.env.NEXT_PUBLIC_CASINO_API || "https://planary
 interface WalletState {
   /** Null until the first answer from the casino wallet. */
   balance: number | null;
+  /** Your card back from the Planary Casino shop (the dealer's face-down card and the shuffle, on your screen). */
+  cardback: string | null;
   refresh: () => void;
   /** The table server reports balances as it moves chips; use them without a round trip. */
   setBalance: (balance: number) => void;
@@ -21,12 +23,15 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
   const { accessToken } = useAuth();
   const pathname = usePathname();
   const [balance, setBalance] = useState<number | null>(null);
+  const [cardback, setCardback] = useState<string | null>(null);
 
   const refresh = useCallback(() => {
     fetch(`${CASINO_API}/v1/me`, { headers: { Authorization: `Bearer ${accessToken}` }, cache: "no-store" })
       .then((res) => (res.ok ? res.json() : null))
-      .then((me: { balance: number } | null) => {
-        if (me) setBalance(me.balance);
+      .then((me: { balance: number; cardback: string | null } | null) => {
+        if (!me) return;
+        setBalance(me.balance);
+        setCardback(me.cardback ?? null);
       })
       .catch(() => {});
   }, [accessToken]);
@@ -51,7 +56,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     return () => window.clearInterval(timer);
   }, [accessToken, table]);
 
-  return <WalletContext.Provider value={{ balance, refresh, setBalance }}>{children}</WalletContext.Provider>;
+  return <WalletContext.Provider value={{ balance, cardback, refresh, setBalance }}>{children}</WalletContext.Provider>;
 }
 
 export function useWallet() {

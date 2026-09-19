@@ -346,42 +346,32 @@ body:has(.app-table) { height: 100%; overflow: hidden; overscroll-behavior: none
 .dealer { display: grid; justify-items: center; gap: 10px; }
 .dealer-label { font-family: var(--font-poster); font-size: 1.1rem; font-weight: 800; letter-spacing: 0.24em; text-transform: uppercase; opacity: 0.85; }
 
-.shoe { position: absolute; right: 0; top: 0; display: grid; justify-items: center; gap: 6px; }
-.shoe-cards { position: relative; isolation: isolate; width: 58px; height: 74px; }
-.shoe-cards span {
+.shoe { position: absolute; right: 0; top: 0; display: grid; justify-items: center; gap: 4px; }
+.shoe-art { display: block; width: 104px; height: auto; overflow: visible; filter: drop-shadow(0 8px 10px rgba(20, 2, 8, 0.45)); }
+.shoe-body { fill: rgba(34, 6, 14, 0.6); }
+.shoe-rim { fill: none; stroke: var(--paper); stroke-width: 2.4; stroke-linejoin: round; }
+.shoe-stack { transition: x 0.5s var(--ease-out), width 0.5s var(--ease-out); }
+.shoe-next { fill: var(--plate-oxblood); stroke: var(--paper); stroke-width: 1.8; }
+.shoe-cutcard { fill: var(--win); stroke: rgba(34, 6, 14, 0.35); stroke-width: 0.6; }
+/* Once the dealer reaches it, the cut card lies next to the shoe. */
+.shoe-cut-out {
   position: absolute;
-  z-index: 1;
-  inset: 0;
-  border-radius: 7px;
-  border: 3px solid var(--paper);
-  background:
-    radial-gradient(circle, var(--paper) 0 5px, transparent 6px) center / 100% 100% no-repeat,
-    repeating-linear-gradient(45deg, rgba(246, 238, 228, 0.3) 0 1px, transparent 1px 7px),
-    repeating-linear-gradient(-45deg, rgba(246, 238, 228, 0.3) 0 1px, transparent 1px 7px),
-    var(--plate-oxblood);
-}
-.shoe-cards span:nth-child(2) { translate: -4px 4px; }
-.shoe-cards span:nth-child(3) { translate: -8px 8px; }
-/* The cut card: a solid yellow plastic card sticking out of the stack until the dealer reaches it. */
-.shoe-cut {
-  position: absolute;
-  z-index: 0;
-  left: 6px;
-  top: -9px;
-  width: 44px;
-  height: 20px;
-  border-radius: 3px 3px 0 0;
+  left: -8px;
+  top: 44px;
+  width: 30px;
+  height: 7px;
+  border-radius: 2px;
   background: var(--win);
-  box-shadow: inset 0 -2px 0 rgba(34, 6, 14, 0.18);
-  transition: translate 0.5s var(--ease-out), rotate 0.5s var(--ease-out), opacity 0.3s ease;
+  box-shadow: 0 3px 6px rgba(20, 2, 8, 0.4);
+  rotate: -18deg;
+  animation: cut-drop 0.5s var(--ease-out) both;
 }
-.shoe.is-cut .shoe-cut { z-index: 2; translate: -34px 46px; rotate: -24deg; }
-.shoe.is-shuffling .shoe-cut { opacity: 0; }
-.shoe-meter { position: relative; width: 58px; height: 5px; border-radius: 3px; background: rgba(34, 6, 14, 0.4); }
-.shoe-fill { display: block; height: 100%; border-radius: 3px; background: var(--paper); transition: width 0.6s var(--ease-out); }
-.shoe-mark { position: absolute; top: -3px; width: 3px; height: 11px; margin-left: -1.5px; border-radius: 1px; background: var(--win); box-shadow: 0 0 0 1px rgba(34, 6, 14, 0.4); }
+@keyframes cut-drop {
+  from { opacity: 0; translate: 30px -14px; rotate: 70deg; }
+}
 .shoe-label { font-size: 0.72rem; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; opacity: 0.8; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .shoe.is-cut .shoe-label { opacity: 1; color: var(--win); }
+.shoe.is-shuffling .shoe-art { opacity: 0.45; transition: opacity 0.3s ease; }
 
 /* ── Shuffle: two halves riffle together three times, get squared, and go into the shoe. ── */
 .shuffle {
@@ -933,6 +923,61 @@ body:has(.app-table) { height: 100%; overflow: hidden; overscroll-behavior: none
 .tour-hand { display: grid; justify-items: center; gap: 6px; margin: 0; }
 .tour-hand .card { border-radius: 5px; box-shadow: none; animation: none; }
 .tour-hand figcaption { font-size: 0.74rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
+
+/* ── Casino cosmetics: avatar borders (same ids as the Planary Casino shop) ── */
+
+.ring { position: relative; }
+.ring img { position: relative; z-index: 1; }
+.ring::before {
+  content: "";
+  position: absolute;
+  inset: -3px;
+  z-index: 0;
+  border-radius: 50%;
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2.5px));
+  mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2.5px));
+  pointer-events: none;
+}
+.border-paper::before { background: var(--paper); }
+.border-cherry::before { background: var(--cherry); }
+.border-halftone::before { background: radial-gradient(circle, var(--paper) 0 1px, transparent 1.3px) 0 0 / 3.5px 3.5px, #d9173c; }
+.border-register::before { background: #ff5a78; filter: drop-shadow(-2px -1.5px 0 #fff3c4); }
+.border-chip::before { background: repeating-conic-gradient(var(--paper) 0 18deg, #d9173c 18deg 45deg); }
+.border-gold::before { background: conic-gradient(from 30deg, #fbe7a6, #e2a93b, #fbe7a6, #b8761c, #fbe7a6); }
+.border-holo::before { background: conic-gradient(from 0deg, #ff5a78, #fff3c4, #8ee6ff, #c58bff, #ff5a78); animation: ring-spin 6s linear infinite; }
+.border-crown::before { background: conic-gradient(from 0deg, #fbe7a6, #e2a93b, #fbe7a6, #b8761c, #fbe7a6); box-shadow: 0 0 12px rgba(247, 198, 92, 0.6); }
+@keyframes ring-spin { to { rotate: 360deg; } }
+
+.avatar span img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; }
+/* On your turn the timer ring takes over from the border. */
+.seat.is-turn .avatar .ring::before { opacity: 0; }
+.plate-title { font-size: 0.62rem; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--win); line-height: 1.2; }
+.seat.is-you .plate-title { color: var(--field); }
+
+/* Card backs: the dealer's face-down card and the shuffle, in your shop design. */
+.cardback-navy .card-back, .cardback-navy .shuffle-card {
+  background:
+    radial-gradient(circle, var(--paper) 0 7px, transparent 8px) center / 100% 100% no-repeat,
+    repeating-linear-gradient(45deg, rgba(246, 238, 228, 0.3) 0 1px, transparent 1px 8px),
+    repeating-linear-gradient(-45deg, rgba(246, 238, 228, 0.3) 0 1px, transparent 1px 8px),
+    #1d2a5c;
+}
+.cardback-felt .card-back, .cardback-felt .shuffle-card {
+  border-color: #efe3c4;
+  background: repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.06) 0 2px, transparent 2px 4px), radial-gradient(ellipse at 50% 30%, #1a7a52, #0b4a30);
+}
+.cardback-deco .card-back, .cardback-deco .shuffle-card {
+  border-color: #e2a93b;
+  background:
+    radial-gradient(circle, #e2a93b 0 5px, transparent 6px) center / 100% 100% no-repeat,
+    repeating-conic-gradient(from 0deg at 50% 50%, rgba(247, 198, 92, 0.7) 0 3deg, transparent 3deg 15deg),
+    #0c0906;
+}
+.cardback-holo .card-back, .cardback-holo .shuffle-card {
+  background: repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.35) 0 1px, transparent 1px 7px), linear-gradient(115deg, #ff5a78, #fff3c4, #8ee6ff, #c58bff) 0 0 / 250% 100%;
+}
+.cardback-holo .card-back.is-dealt { animation: deal 0.55s var(--ease-out) both, holo-pan 6s linear 0.6s infinite; }
+@keyframes holo-pan { to { background-position: 250% 0; } }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }

@@ -10,6 +10,7 @@ import {
   type ClientMessage,
   type Hand,
   INSURANCE_MS,
+  type PlayerLook,
   isPrivateTableId,
   MAX_BET,
   MAX_HANDS,
@@ -70,6 +71,8 @@ function cleanName(raw: unknown) {
 export class Table extends Server<Env> {
   state!: TableState;
   shoe: Card[] = freshShoe();
+  /** Players who split aces this round (for achievements). */
+  splitAces = new Set<string>();
   /** A brand-new table shuffles in front of the first player who sits down. */
   needsShuffle = true;
   timer: ReturnType<typeof setTimeout> | null = null;
@@ -162,7 +165,7 @@ export class Table extends Server<Env> {
   // ── Wallet (planary-casino-api) ───────────────
 
   /** Chips live in the casino wallet; the table only moves them, worker to worker. */
-  async wallet(path: string, body: Record<string, unknown>): Promise<{ ok?: boolean; balance: number }> {
+  async wallet(path: string, body: Record<string, unknown>): Promise<{ ok?: boolean; balance: number } & Partial<PlayerLook>> {
     const res = await this.env.CASINO.fetch(
       new Request(`https://casino.internal${path}`, {
         method: "POST",
@@ -172,6 +175,11 @@ export class Table extends Server<Env> {
     );
     if (!res.ok) throw new Error(`wallet ${path} → ${res.status}`);
     return res.json();
+  }
+
+  /** Any other call to the casino API. */
+  async casino<T>(path: string, body: Record<string, unknown>): Promise<T> {
+    return (await this.wallet(path, body)) as unknown as T;
   }
 
   userId(playerId: string) {
@@ -227,8 +235,11 @@ export class Table extends Server<Env> {
         if (!Number.isInteger(index) || index < 0 || index >= SEATS) return "That seat doesn't exist.";
         if (this.state.seats[index]) return "That seat is taken.";
         let stack: number;
+        let look: PlayerLook;
         try {
-          ({ balance: stack } = await this.wallet("/internal/wallet", { userId: this.userId(who.playerId), name: who.name }));
+          const res = await this.wallet("/internal/wallet", { userId: this.userId(who.playerId), name: who.name });
+          stack = res.balance;
+          look = { avatar: res.avatar ?? null, border: res.border ?? null, title: res.title ?? null, chipset: res.chipset ?? null };
         } catch {
           return "Chips are unavailable right now. Try again in a moment.";
         }
@@ -238,6 +249,7 @@ export class Table extends Server<Env> {
         this.state.seats[index] = {
           playerId: who.playerId,
           name: who.name,
+          look,
           stack,
           bet: 0,
           lastBet: 0,
@@ -548,6 +560,7 @@ export class Table extends Server<Env> {
       const problem = await this.extraStake(seat, hand.bet, turn);
       if (problem) return problem;
       const aces = hand.cards[0].rank === "A";
+      if (aces) this.splitAces.add(seat.playerId);
       const second: Hand = { cards: [hand.cards.pop()!], bet: hand.bet, doubled: false, done: false, fromSplit: true };
       hand.fromSplit = true;
       hand.cards.push(this.draw());
@@ -621,6 +634,9 @@ export class Table extends Server<Env> {
       if (payout > 0) payouts.set(seat, payout);
     }
 
+    this.reportRounds(dealerBJ);
+    this.splitAces.clear();
+
     this.state.phase = "settle";
     this.state.turn = null;
     this.state.dealer.holeHidden = false;
@@ -646,6 +662,27 @@ export class Table extends Server<Env> {
       }),
     );
     this.broadcastState();
+  }
+
+  /** Tells the casino how each player's round went, for stats and achievements, and announces unlocks. */
+  reportRounds(dealerBJ: boolean) {
+    const played = this.state.seats.filter((s): s is Seat => !!s && s.hands.length > 0 && s.playerId.startsWith("u-"));
+    const tablemates = played.map((s) => this.userId(s.playerId));
+    for (const seat of played) {
+      const insurance = seat.insurance ?? 0;
+      const round = {
+        game: "blackjack",
+        net: seat.hands.reduce((sum, h) => sum + (h.net ?? 0), 0) + (insurance ? (dealerBJ ? insurance * 2 : -insurance) : 0),
+        hands: seat.hands.map((h) => ({ result: h.result ?? "lose", doubled: h.doubled, cards: h.cards.length, total: handValue(h.cards).total })),
+        splitAces: this.splitAces.has(seat.playerId),
+        insuranceWon: dealerBJ && insurance > 0,
+      };
+      void this.casino<{ unlocked: { id: string; name: string }[] }>("/internal/round", { userId: this.userId(seat.playerId), round, tablemates })
+        .then(({ unlocked }) => {
+          for (const a of unlocked) this.postChat({ name: null, playerId: null, text: `${seat.name} unlocked ${a.name}.` });
+        })
+        .catch((error) => console.error("round report failed", error));
+    }
   }
 
   nextRound() {

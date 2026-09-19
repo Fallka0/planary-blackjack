@@ -1,13 +1,9 @@
-/** Planary Chips, drawn flat in two inks. Each denomination has its own print colour. */
-const DENOMINATIONS: Record<number, { fill: string; ink: string }> = {
-  10: { fill: "#f6eee4", ink: "#2a0710" },
-  50: { fill: "#ff2e55", ink: "#f6eee4" },
-  100: { fill: "#1d1846", ink: "#f6eee4" },
-  500: { fill: "#e8c7a2", ink: "#5a0f22" },
-};
+import { chipInks } from "@/lib/chipsets";
 
-export function ChipIcon({ size = 18, letter, value }: { size?: number; letter?: string; value?: number }) {
-  const colors = (value && DENOMINATIONS[value]) || { fill: "var(--cherry)", ink: "var(--paper)" };
+/** Planary Chips, drawn flat in two inks. Each denomination has its own print colour, set by the player's chip set. */
+
+export function ChipIcon({ size = 18, letter, value, set }: { size?: number; letter?: string; value?: number; set?: string | null }) {
+  const colors = value ? chipInks(set, value) : { fill: "var(--cherry)", ink: "var(--paper)" };
   return (
     <svg viewBox="0 0 40 40" width={size} height={size} aria-hidden="true" className="chip-icon">
       <circle cx="20" cy="20" r="19" fill={colors.fill} />

@@ -1,33 +1,58 @@
 import type { TableState } from "../../shared/protocol";
 
-/** The shoe in the corner: how much is left, where the cut card sits, and whether it's out. */
+const X0 = 22; // front of the stack (the mouth, where cards come out)
+const X1 = 90; // back wall
+const SPAN = X1 - X0;
+const BODY = "M4 58 H96 V18 Q96 12 90 12 H42 L18 36 H4 Z";
+
+/**
+ * The shoe in the corner, seen from the side: the stack of cards drains toward the mouth,
+ * and the yellow cut card sits in the stack at its depth until the dealer reaches it.
+ */
 export function Shoe({ state }: { state: TableState }) {
   const { shoeRemaining, shoeSize, cutCard, cutCardOut, phase } = state;
-  const left = (shoeRemaining / shoeSize) * 100;
-  const cut = (cutCard / shoeSize) * 100;
-  const label =
-    phase === "shuffle" ? "Shuffling" : cutCardOut ? "Last round" : `${Math.round(((shoeSize - shoeRemaining) / shoeSize) * 100)}% dealt`;
+  const shuffling = phase === "shuffle";
+  const stack = shuffling ? SPAN : (shoeRemaining / shoeSize) * SPAN;
+  const front = X1 - stack;
+  const cutX = X1 - (cutCard / shoeSize) * SPAN;
+  const label = shuffling ? "Shuffling" : cutCardOut ? "Last round" : `${Math.round(((shoeSize - shoeRemaining) / shoeSize) * 100)}% dealt`;
 
   return (
     <div
-      className={`shoe${cutCardOut ? " is-cut" : ""}${phase === "shuffle" ? " is-shuffling" : ""}`}
+      className={`shoe${cutCardOut && !shuffling ? " is-cut" : ""}${shuffling ? " is-shuffling" : ""}`}
       role="img"
       aria-label={
-        phase === "shuffle"
+        shuffling
           ? "Shoe: the dealer is shuffling a new shoe"
           : `Shoe: ${shoeRemaining} of ${shoeSize} cards left${cutCardOut ? ", the cut card is out, new shoe after this round" : ""}`
       }
     >
-      <span className="shoe-cards" aria-hidden="true">
-        <span />
-        <span />
-        <span />
-        <i className="shoe-cut" />
-      </span>
-      <span className="shoe-meter" aria-hidden="true">
-        <span className="shoe-fill" style={{ width: `${left}%` }} />
-        <span className="shoe-mark" style={{ left: `${cut}%` }} />
-      </span>
+      <svg viewBox="0 0 100 64" className="shoe-art" aria-hidden="true">
+        <defs>
+          {/* Card edges seen from the side. */}
+          <pattern id="shoe-edges" width="1.8" height="4" patternUnits="userSpaceOnUse">
+            <rect width="1.8" height="4" fill="var(--paper)" />
+            <rect width="0.6" height="4" fill="var(--plate-oxblood)" opacity="0.35" />
+          </pattern>
+          <clipPath id="shoe-inside">
+            <path d={BODY} />
+          </clipPath>
+        </defs>
+        <path className="shoe-body" d={BODY} />
+        <g clipPath="url(#shoe-inside)">
+          <rect className="shoe-stack" x={front} y="30" width={Math.max(0, stack)} height="24" fill="url(#shoe-edges)" />
+          {!cutCardOut || shuffling ? <rect className="shoe-cutcard" x={cutX - 1.5} y="24" width="3" height="30" rx="0.8" /> : null}
+        </g>
+        {/* The next card, leaning out of the mouth. */}
+        {stack > 0.5 ? (
+          <g transform={`rotate(-38 ${front} 54)`}>
+            <rect className="shoe-next" x={front - 17} y="30" width="17" height="24" rx="2.5" />
+            <circle cx={front - 8.5} cy="42" r="2.2" fill="var(--paper)" />
+          </g>
+        ) : null}
+        <path className="shoe-rim" d={BODY} />
+      </svg>
+      {cutCardOut && !shuffling ? <span className="shoe-cut-out" aria-hidden="true" /> : null}
       <span className="shoe-label" aria-hidden="true">
         {label}
       </span>
