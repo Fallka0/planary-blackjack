@@ -16,6 +16,7 @@ import {
 import { Chat } from "@/components/Chat";
 import { ChipIcon, chipBreakdown } from "@/components/ChipIcon";
 import { PlayingCard } from "@/components/PlayingCard";
+import { Fairness } from "@/components/Fairness";
 import { Shoe, ShuffleShow } from "@/components/Shoe";
 import { TopBar } from "@/components/TopBar";
 import { Tutorial, useTutorial } from "@/components/Tutorial";
@@ -456,6 +457,8 @@ export function Table({ id }: { id: string }) {
             </div>
           )}
         </section>
+
+        {state ? <Fairness fair={state.fair} mySeed={you?.seed ?? null} send={send} /> : null}
 
         {state ? (
           <>

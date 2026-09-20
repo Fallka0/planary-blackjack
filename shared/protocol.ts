@@ -9,6 +9,9 @@ export const CHIP_VALUES = [10, 50, 100, 500] as const;
 export const BETTING_MS = 15_000;
 export const TURN_MS = 20_000;
 export const INSURANCE_MS = 10_000;
+/** Where a player is sent to check a shoe for themselves. */
+export const VERIFY_URL = "https://casino.planary.ch/verify";
+
 export const SHUFFLE_MS = 5_500;
 /** Most hands a player can hold after re-splitting. */
 export const MAX_HANDS = 4;
@@ -131,7 +134,7 @@ export type ServerMessage =
   | {
       type: "state";
       state: TableState;
-      you: { playerId: string; seat: number | null; verified: boolean };
+      you: { playerId: string; seat: number | null; verified: boolean; /** The seed you have offered for the next shoe. */ seed: string | null };
       /** Server clock when sent, so clients can correct deadlines for clock skew. */
       now: number;
     }

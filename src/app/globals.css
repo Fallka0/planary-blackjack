@@ -982,3 +982,61 @@ body:has(.app-table) { height: 100%; overflow: hidden; overscroll-behavior: none
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+
+/* ── Provable fairness ─────────────────────────
+   Pinned beside the shoe, because that is the thing it makes a claim about. */
+
+/* A strip under the felt: readable without covering a card. */
+.fair {
+  width: 100%;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-areas: "head hash seed" "note note note" "last last last" "link link link";
+  align-items: center;
+  gap: 6px 14px;
+  padding: 10px 14px;
+  border-radius: 14px 5px 14px 5px;
+  background: rgba(20, 6, 10, 0.5);
+  border: 1px solid var(--line);
+  font-size: 0.8rem;
+  backdrop-filter: blur(6px);
+}
+.fair-head { grid-area: head; display: flex; align-items: center; gap: 7px; color: var(--text-2); }
+.fair-head h2 { font-size: 0.72rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; margin: 0; }
+.fair-nonce { margin-left: auto; color: var(--text-3); }
+
+.mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.76rem; word-break: break-all; }
+.fair-hash { grid-area: hash; color: var(--gold, #f5c451); margin: 0; }
+.fair-note { grid-area: note; color: var(--text-3); font-size: 0.74rem; line-height: 1.45; max-width: 78ch; }
+
+.fair-seed { grid-area: seed; display: flex; gap: 6px; width: 230px; }
+.fair-seed input {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 30px;
+  padding: 0 9px;
+  border-radius: 9px 3px 9px 3px;
+  border: 1px solid var(--line-2);
+  background: rgba(0, 0, 0, 0.3);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.78rem;
+}
+.fair-seed input::placeholder { color: var(--text-3); }
+.fair-seed .icon-btn { width: 30px; height: 30px; flex: none; }
+
+.fair-last { grid-area: last; }
+.fair-last summary { cursor: pointer; color: var(--text-2); font-size: 0.76rem; display: flex; align-items: center; gap: 6px; }
+.fair-last[open] summary { margin-bottom: 7px; }
+.fair-proof { display: grid; gap: 4px; margin: 0; }
+.fair-proof div { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: baseline; }
+.fair-proof dt { color: var(--text-3); font-size: 0.72rem; }
+.fair-proof dd { margin: 0; color: var(--text); text-align: right; }
+
+.fair-link { grid-area: link; color: var(--text-3); font-size: 0.74rem; text-decoration: underline; text-underline-offset: 3px; }
+.fair-link:hover { color: var(--text); }
+
+@media (max-width: 760px) {
+  .fair { grid-template-columns: 1fr; grid-template-areas: "head" "hash" "seed" "note" "last" "link"; }
+  .fair-seed { width: 100%; }
+}

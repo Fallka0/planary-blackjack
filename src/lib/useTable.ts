@@ -13,7 +13,7 @@ export function useTable(tableId: string) {
   const { accessToken } = useAuth();
   const { setBalance } = useWallet();
   const [state, setState] = useState<TableState | null>(null);
-  const [you, setYou] = useState<{ playerId: string; seat: number | null; verified: boolean } | null>(null);
+  const [you, setYou] = useState<{ playerId: string; seat: number | null; verified: boolean; seed: string | null } | null>(null);
   const [status, setStatus] = useState<ConnectionStatus>("connecting");
   const [error, setError] = useState<string | null>(null);
   const [chat, setChat] = useState<ChatMessage[]>([]);
