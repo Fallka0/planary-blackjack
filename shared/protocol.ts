@@ -58,6 +58,32 @@ export interface Seat {
   insurance: number | null;
 }
 
+/**
+ * What the table has promised about this shoe, and what it proved about the last.
+ *
+ * Blackjack commits per shoe rather than per hand: the whole six-deck order is
+ * fixed by a seed before the first card is dealt, so one reveal at the end
+ * proves every hand that came out of it. Cards already dealt cannot be checked
+ * mid-shoe — publishing the seed then would hand you the rest of the shoe.
+ */
+export interface Fairness {
+  /** SHA-256 of the seed the current shoe was shuffled from. */
+  hash: string | null;
+  /** Seeds contributed by the players seated when this shoe was shuffled. */
+  seeds: string[];
+  /** Counts shoes at this table. */
+  nonce: number;
+  /** The shoe just retired, laid open. */
+  lastShoe: {
+    hash: string;
+    serverSeed: string;
+    clientSeed: string;
+    nonce: number;
+    /** Where the cut card sat, which the same seed decided. */
+    cutCard: number;
+  } | null;
+}
+
 export interface TableState {
   id: string;
   isPrivate: boolean;
@@ -73,9 +99,12 @@ export interface TableState {
   cutCard: number;
   cutCardOut: boolean;
   round: number;
+  fair: Fairness;
 }
 
 export type ClientMessage =
+  /** Your contribution to the next shoe's shuffle. Taken until the shoe is cut. */
+  | { type: "seed"; value: string }
   | { type: "sit"; seat: number }
   | { type: "leave" }
   | { type: "bet"; amount: number }

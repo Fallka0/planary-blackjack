@@ -1,0 +1,52 @@
+{
+  "note": "Frozen. A change that breaks these is a change that breaks verification.",
+  "rolls": [
+    {
+      "serverSeed": "0000000000000000000000000000000000000000000000000000000000000000",
+      "clientSeed": "",
+      "nonce": 0,
+      "range": 37,
+      "roll": 25
+    },
+    {
+      "serverSeed": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "clientSeed": "planary",
+      "nonce": 1,
+      "range": 37,
+      "roll": 28
+    },
+    {
+      "serverSeed": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "clientSeed": "alice|bob",
+      "nonce": 42,
+      "range": 37,
+      "roll": 19
+    },
+    {
+      "serverSeed": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "clientSeed": "alice|bob",
+      "nonce": 42,
+      "range": 312,
+      "roll": 71
+    },
+    {
+      "serverSeed": "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+      "clientSeed": "a-very-long-client-seed-from-a-player",
+      "nonce": 999,
+      "range": 2,
+      "roll": 1
+    }
+  ],
+  "shoeFirstTen": [
+    45,
+    28,
+    24,
+    7,
+    35,
+    15,
+    2,
+    42,
+    0,
+    14
+  ]
+}
