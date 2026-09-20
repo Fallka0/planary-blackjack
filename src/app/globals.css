@@ -984,59 +984,70 @@ body:has(.app-table) { height: 100%; overflow: hidden; overscroll-behavior: none
 }
 
 /* ── Provable fairness ─────────────────────────
-   Pinned beside the shoe, because that is the thing it makes a claim about. */
+   A quiet line under the felt. Closed by default: the felt is the game, and
+   this is for the few who want to check the arithmetic. */
 
-/* A strip under the felt: readable without covering a card. */
-.fair {
-  width: 100%;
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  grid-template-areas: "head hash seed" "note note note" "last last last" "link link link";
+.fair { display: grid; gap: 7px; justify-items: start; padding: 0 2px; }
+
+.fair-pill {
+  display: inline-flex;
   align-items: center;
-  gap: 6px 14px;
-  padding: 10px 14px;
+  gap: 7px;
+  height: 28px;
+  padding: 0 11px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--text-3);
+  font-size: 0.75rem;
+  font-weight: 600;
+  transition: color 0.16s ease, border-color 0.16s ease, background-color 0.16s ease;
+}
+.fair-pill:hover { color: var(--text); border-color: var(--line-2); background: rgba(255, 255, 255, 0.04); }
+.fair-chevron { transition: transform 0.18s ease; }
+.fair.is-open .fair-pill { color: var(--text); border-color: var(--line-2); }
+.fair.is-open .fair-chevron { transform: rotate(180deg); }
+.fair-mine { width: 6px; height: 6px; border-radius: 50%; background: var(--gold, #f5c451); }
+
+.fair-panel {
+  width: 100%;
+  max-width: 560px;
+  display: grid;
+  gap: 9px;
+  padding: 12px 14px;
   border-radius: 14px 5px 14px 5px;
-  background: rgba(20, 6, 10, 0.5);
+  background: rgba(20, 6, 10, 0.55);
   border: 1px solid var(--line);
   font-size: 0.8rem;
-  backdrop-filter: blur(6px);
+  animation: fair-in 0.18s ease both;
 }
-.fair-head { grid-area: head; display: flex; align-items: center; gap: 7px; color: var(--text-2); }
-.fair-head h2 { font-size: 0.72rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; margin: 0; }
-.fair-nonce { margin-left: auto; color: var(--text-3); }
+@keyframes fair-in { from { opacity: 0; transform: translateY(-4px); } }
 
-.mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.76rem; word-break: break-all; }
-.fair-hash { grid-area: hash; color: var(--gold, #f5c451); margin: 0; }
-.fair-note { grid-area: note; color: var(--text-3); font-size: 0.74rem; line-height: 1.45; max-width: 78ch; }
+.mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.75rem; word-break: break-all; }
+.fair-note { color: var(--text-3); font-size: 0.75rem; line-height: 1.45; }
+.fair-sealed { color: var(--text-3); font-style: italic; }
+.fair-opened { display: flex; align-items: center; gap: 6px; color: var(--text-2); font-size: 0.74rem; }
 
-.fair-seed { grid-area: seed; display: flex; gap: 6px; width: 230px; }
+.fair-proof { display: grid; gap: 5px; margin: 0; }
+.fair-proof div { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 12px; align-items: baseline; }
+.fair-proof dt { color: var(--text-3); font-size: 0.73rem; white-space: nowrap; }
+.fair-proof dd { margin: 0; color: var(--text); text-align: right; min-width: 0; }
+
+.fair-seed { display: flex; gap: 6px; }
 .fair-seed input {
   flex: 1 1 0;
   min-width: 0;
-  height: 30px;
-  padding: 0 9px;
+  height: 32px;
+  padding: 0 10px;
   border-radius: 9px 3px 9px 3px;
   border: 1px solid var(--line-2);
   background: rgba(0, 0, 0, 0.3);
   color: var(--text);
   font: inherit;
-  font-size: 0.78rem;
+  font-size: 0.8rem;
 }
 .fair-seed input::placeholder { color: var(--text-3); }
-.fair-seed .icon-btn { width: 30px; height: 30px; flex: none; }
+.fair-seed .icon-btn { width: 32px; height: 32px; flex: none; }
 
-.fair-last { grid-area: last; }
-.fair-last summary { cursor: pointer; color: var(--text-2); font-size: 0.76rem; display: flex; align-items: center; gap: 6px; }
-.fair-last[open] summary { margin-bottom: 7px; }
-.fair-proof { display: grid; gap: 4px; margin: 0; }
-.fair-proof div { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: baseline; }
-.fair-proof dt { color: var(--text-3); font-size: 0.72rem; }
-.fair-proof dd { margin: 0; color: var(--text); text-align: right; }
-
-.fair-link { grid-area: link; color: var(--text-3); font-size: 0.74rem; text-decoration: underline; text-underline-offset: 3px; }
+.fair-link { color: var(--gold, #f5c451); font-size: 0.76rem; text-decoration: underline; text-underline-offset: 3px; }
 .fair-link:hover { color: var(--text); }
-
-@media (max-width: 760px) {
-  .fair { grid-template-columns: 1fr; grid-template-areas: "head" "hash" "seed" "note" "last" "link"; }
-  .fair-seed { width: 100%; }
-}
