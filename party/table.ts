@@ -1,6 +1,7 @@
 import { type Connection, type ConnectionContext, getServerByName, Server, type WSMessage } from "partyserver";
 import type { Env } from "./env";
-import { commit, joinClientSeeds, newServerSeed, open as openStream, sanitiseClientSeed, shuffle } from "../shared/fair";
+import { commit, joinClientSeeds, newServerSeed, sanitiseClientSeed } from "../shared/fair";
+import { cutCardFor, DECKS as SHARED_DECKS, orderedShoe as orderedCodes, shuffledShoe as shuffledCodes } from "../shared/deck";
 import { type Card, canSplitCards, handValue, isBlackjack, RANKS, SUITS } from "../shared/cards";
 import {
   BETTING_MS,
@@ -26,8 +27,33 @@ import {
   TURN_MS,
 } from "../shared/protocol";
 
-const DECKS = 6;
+/** One number, shared with the verifier: a table dealing a different count would be unverifiable. */
+const DECKS = SHARED_DECKS;
 const DEALER_STEP_MS = 750;
+
+/**
+ * The provable part of a shoe, kept in durable storage.
+ *
+ * A Durable Object can be evicted at any moment. If the seed behind the shoe
+ * in play lived only in memory, an eviction would lose it — and every hand
+ * dealt out of that shoe would stay unverifiable for good, which is precisely
+ * the failure the commitment exists to prevent. So it is written down, and the
+ * shoe is rebuilt from it rather than reshuffled.
+ */
+interface ShoeRecord {
+  serverSeed: string;
+  clientSeed: string;
+  seeds: string[];
+  hash: string;
+  nonce: number;
+  commitmentId: string | null;
+  cutCard: number;
+  cutCardOut: boolean;
+  /** How far the dealer had got. */
+  at: number;
+}
+
+const SHOE_KEY = "shoe";
 
 interface Identity {
   playerId: string;
@@ -35,30 +61,27 @@ interface Identity {
   verified: boolean;
 }
 
-/** Six decks in their factory order, before anyone touches them. */
-function orderedShoe(): Card[] {
-  const cards: Card[] = [];
-  for (let d = 0; d < DECKS; d++) for (const suit of SUITS) for (const rank of RANKS) cards.push({ rank, suit });
-  return cards;
+/** "Aspade" back into a card the table can deal. */
+function toCard(code: string): Card {
+  const match = /^(.+?)(spade|heart|diamond|club)$/.exec(code);
+  return { rank: (match?.[1] ?? "A") as Card["rank"], suit: (match?.[2] ?? "spade") as Card["suit"] };
 }
 
 /**
  * The shoe, shuffled from a seed the table has already committed to.
  *
- * The cut card comes out of the same stream, which means even where the shoe
- * ends is settled in advance rather than chosen by the house — one seed
- * decides the whole shoe, and one reveal proves all of it.
+ * Both the order of the decks and the shuffle come from shared/deck.ts, the
+ * same file the verifier uses — a table that laid its cards out differently
+ * would deal hands nobody could check.
  */
-async function shuffledShoe(serverSeed: string, clientSeed: string, nonce: number): Promise<{ cards: Card[]; cutCard: number }> {
-  const cards = await shuffle(orderedShoe(), serverSeed, clientSeed, nonce);
-  // A separate stream for the cut card, so it cannot be read off the shuffle.
-  const cutCard = 60 + (await openStream(serverSeed, `${clientSeed}:cut`, nonce).below(21));
-  return { cards, cutCard };
+async function shuffledShoe(serverSeed: string, clientSeed: string, nonce: number): Promise<{ codes: string[]; cards: Card[]; cutCard: number }> {
+  const codes = await shuffledCodes(serverSeed, clientSeed, nonce, DECKS);
+  return { codes, cards: codes.map(toCard), cutCard: await cutCardFor(serverSeed, clientSeed, nonce) };
 }
 
 /** The emergency shoe, for a case the cut card makes unreachable. Not provable, and recorded as such. */
 function panicShoe(): Card[] {
-  const cards = orderedShoe();
+  const cards = orderedCodes(DECKS).map(toCard);
   for (let i = cards.length - 1; i > 0; i--) {
     const j = randomBelow(i + 1);
     [cards[i], cards[j]] = [cards[j], cards[i]];
@@ -93,6 +116,18 @@ export class Table extends Server<Env> {
   commitmentId: string | null = null;
   /** Seeds offered for the next shuffle, by player. */
   offeredSeeds = new Map<string, string>();
+  /** The shoe as written down, so a round can say which cards left it and in what order. */
+  shoeCodes: string[] = [];
+  /** How far into the shoe the dealer has got. Cards come off the front, so index i is the i-th card dealt. */
+  shoeAt = 0;
+  /** Every card this round has pulled, in the order it pulled them. */
+  roundDraws: string[] = [];
+  /** The shoe position this round's first card came from, or -1 before it deals. */
+  roundFrom = -1;
+  /** The shoe in play as it is written down, so an eviction cannot lose it. */
+  shoeRecord: ShoeRecord | null = null;
+  /** Resolves once a shoe exists; nothing deals before it does. */
+  shoeReady: Promise<void> = Promise.resolve();
   /** Set if the emergency shoe ever had to be used, so the round records say so. */
   unprovable = false;
   /** When the hand now being played began. */
@@ -128,7 +163,37 @@ export class Table extends Server<Env> {
       round: 1,
       fair: { hash: null, seeds: [], nonce: 0, lastShoe: null },
     };
-    await this.newShoe();
+    this.shoeReady = this.bootShoe();
+    await this.shoeReady;
+  }
+
+  /** Picks up the shoe that was in play, or cuts the first one. */
+  async bootShoe() {
+    const saved = await this.ctx.storage.get<ShoeRecord>(SHOE_KEY);
+    if (!saved) {
+      await this.newShoe();
+      return;
+    }
+    const codes = await shuffledCodes(saved.serverSeed, saved.clientSeed, saved.nonce, DECKS);
+    this.shoeCodes = codes;
+    this.shoe = codes.map(toCard);
+    this.shoeAt = saved.at;
+    this.serverSeed = saved.serverSeed;
+    this.commitmentId = saved.commitmentId;
+    this.shoeRecord = saved;
+    this.state.cutCard = saved.cutCard;
+    this.state.cutCardOut = saved.cutCardOut;
+    this.state.shoeRemaining = codes.length - saved.at;
+    this.state.fair = { hash: saved.hash, seeds: saved.seeds, nonce: saved.nonce, lastShoe: null };
+  }
+
+  /** Writes the shoe down. Called whenever the dealer's position in it moves. */
+  async rememberShoe() {
+    if (!this.shoeRecord) return;
+    this.shoeRecord.at = this.shoeAt;
+    this.shoeRecord.cutCardOut = this.state.cutCardOut;
+    this.shoeRecord.commitmentId = this.commitmentId;
+    await this.ctx.storage.put(SHOE_KEY, this.shoeRecord);
   }
 
   // ── Connections ───────────────────────────────
@@ -392,28 +457,45 @@ export class Table extends Server<Env> {
     this.setTimer(BETTING_MS, () => void this.startRound());
   }
 
+  /**
+   * Takes the next card off the front of the shoe.
+   *
+   * Dealing from the front rather than popping off the back is what makes a
+   * hand checkable: the card at index i of the committed shuffle is the i-th
+   * card dealt, so the record only has to say where the round started and
+   * which cards came out, in order.
+   */
   draw(): Card {
-    // Only a very long round can run the shoe dry after the cut card; a real dealer would shuffle the discards.
-    if (this.shoe.length === 0) {
+    if (this.shoeAt >= this.shoe.length) {
       // Unreachable while the cut card sits 60–80 cards from the back, but a
       // live table must never deal from an empty shoe. If it ever happens the
       // rest of this shoe is not provable, and every round says so.
       this.shoe = panicShoe();
+      this.shoeCodes = this.shoe.map((c) => `${c.rank}${c.suit}`);
+      this.shoeAt = 0;
       this.unprovable = true;
     }
-    const card = this.shoe.pop()!;
-    this.state.shoeRemaining = this.shoe.length;
-    if (!this.state.cutCardOut && this.shoe.length < this.state.cutCard) {
+    const index = this.shoeAt++;
+    if (this.roundFrom < 0) this.roundFrom = index;
+    this.roundDraws.push(this.shoeCodes[index] ?? "");
+    this.state.shoeRemaining = this.shoe.length - this.shoeAt;
+    if (!this.state.cutCardOut && this.state.shoeRemaining < this.state.cutCard) {
       this.state.cutCardOut = true;
       this.postChat({ name: null, playerId: null, text: "The cut card is out. New shoe after this round." });
     }
-    return card;
+    void this.rememberShoe();
+    return this.shoe[index];
   }
 
   async startRound() {
     if (this.starting || this.state.phase !== "betting") return;
     this.starting = true;
     this.clearTimer();
+    await this.shoeReady;
+    // A fresh page in the record: this round's cards and where in the shoe they start.
+    this.roundDraws = [];
+    this.roundFrom = -1;
+    this.roundStartedAt = Date.now();
     try {
       // Take every bet from the wallet first; a bet the wallet can't cover sits the round out.
       const candidates = this.state.seats.filter((s): s is Seat => !!s && s.bet >= MIN_BET);
@@ -780,6 +862,10 @@ export class Table extends Server<Env> {
           dealer: dealer.map((c) => `${c.rank}${c.suit}`),
           dealerBlackjack: dealerBJ,
           cardsDealtFromShoe: dealt,
+          /** Where in the committed shoe this round's first card came from. */
+          from: this.roundFrom,
+          /** Every card the round pulled, in the order it pulled them: the shoe read back. */
+          drawn: [...this.roundDraws],
           /** True only if the emergency shoe ever had to be cut in. */
           unprovable: this.unprovable,
         },
@@ -839,8 +925,10 @@ export class Table extends Server<Env> {
     const clientSeed = joinClientSeeds(seeds);
     const nonce = this.state.fair.nonce + 1;
 
-    const { cards, cutCard } = await shuffledShoe(serverSeed, clientSeed, nonce);
+    const { codes, cards, cutCard } = await shuffledShoe(serverSeed, clientSeed, nonce);
     this.shoe = cards;
+    this.shoeCodes = codes;
+    this.shoeAt = 0;
     this.serverSeed = serverSeed;
     this.unprovable = false;
     this.needsShuffle = false;
@@ -849,6 +937,8 @@ export class Table extends Server<Env> {
     this.state.cutCardOut = false;
     this.state.fair = { hash, seeds, nonce, lastShoe: this.state.fair.lastShoe };
     this.offeredSeeds.clear();
+    this.shoeRecord = { serverSeed, clientSeed, seeds, hash, nonce, commitmentId: null, cutCard, cutCardOut: false, at: 0 };
+    await this.rememberShoe();
 
     this.commitmentId = await this.casino<{ id: string }>("/internal/commitments", {
       game: "blackjack",
@@ -864,6 +954,7 @@ export class Table extends Server<Env> {
         console.error("shoe commitment not filed", error);
         return null;
       });
+    await this.rememberShoe();
   }
 
   /** Publishes the seed behind the shoe that has just been played out. */
@@ -878,6 +969,7 @@ export class Table extends Server<Env> {
       cutCard: this.state.cutCard,
     };
     this.serverSeed = null;
+    this.shoeRecord = null;
     const commitmentId = this.commitmentId;
     this.commitmentId = null;
     if (commitmentId) {
@@ -968,7 +1060,7 @@ export class Table extends Server<Env> {
       const message: ServerMessage = {
         type: "state",
         state: this.publicState(),
-        you: { playerId: id.playerId, seat: this.seatOf(id.playerId), verified: id.verified },
+        you: { playerId: id.playerId, seat: this.seatOf(id.playerId), verified: id.verified, seed: this.offeredSeeds.get(id.playerId) ?? null },
         now: Date.now(),
       };
       conn.send(JSON.stringify(message));

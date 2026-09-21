@@ -11,12 +11,27 @@
  * If a change here makes them fail, the change is wrong — not the vectors.
  */
 
-import { readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import * as fair from "../shared/fair.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
+
+/**
+ * The shared modules import each other the way a bundler expects, without file
+ * extensions, which plain node cannot resolve. Rather than bend the source to
+ * suit the test — the source is what ships — the test takes a copy with the
+ * extensions written in and runs against that.
+ */
+const staging = mkdtempSync(join(tmpdir(), "planary-fair-"));
+mkdirSync(staging, { recursive: true });
+for (const name of ["fair.ts", "deck.ts"]) {
+  const source = readFileSync(join(here, "..", "shared", name), "utf8");
+  writeFileSync(join(staging, name), source.replace(/(from "\.\/[A-Za-z]+)"/g, '$1.ts"'));
+}
+const fair = await import(`file://${join(staging, "fair.ts")}`);
+const cards = await import(`file://${join(staging, "deck.ts")}`);
 const VECTORS = join(here, "..", "shared", "fair.vectors.json");
 
 let failures = 0;
@@ -89,6 +104,22 @@ const otherShoe = await fair.shuffle(SHOE, shoeSeed, "alice|bob", 4);
 check("the next shoe is a different order", dealt.join() !== otherShoe.join());
 check("the cut card is not readable off the shuffle", cut !== dealt[0] % 21 + 60);
 
+console.log("\nThe deck everyone must agree on");
+// A verifier that laid its 312 cards out in a different order before shuffling
+// would rebuild a different shoe from the same seed, and call an honest hand a
+// lie. The factory order is therefore frozen here too.
+const ordered = cards.orderedShoe();
+check("312 cards, four suits, thirteen ranks", ordered.length === 312 && new Set(ordered).size === 52);
+check("the factory order starts A♠ 2♠ 3♠", ordered.slice(0, 3).join(" ") === "Aspade 2spade 3spade");
+check("a card reads back as a person writes it", cards.prettyCard("10heart") === "10♥");
+const realShoe = await cards.shuffledShoe(shoeSeed, "alice|bob", 3);
+check("the shoe rebuilds from the same seed", (await cards.shuffledShoe(shoeSeed, "alice|bob", 3)).join() === realShoe.join());
+const realCut = await cards.cutCardFor(shoeSeed, "alice|bob", 3);
+check(`the cut card sits at ${realCut}`, realCut >= 60 && realCut <= 80);
+check("a hand dealt off the shoe verifies", cards.checkCards(realShoe, 10, realShoe.slice(10, 16)).ok);
+check("one wrong card is caught", !cards.checkCards(realShoe, 10, [...realShoe.slice(10, 15), "Aspade"]).ok);
+check("the right cards at the wrong position are caught", !cards.checkCards(realShoe, 11, realShoe.slice(10, 16)).ok);
+
 console.log("\nVerification");
 const proof = { hash, serverSeed: seed, clientSeed: "alice|bob", nonce: 7 };
 const outcome = await fair.roll(seed, proof.clientSeed, 7, 37);
@@ -111,7 +142,12 @@ for (const c of CASES) {
   produced.push({ ...c, roll: await fair.roll(c.serverSeed, c.clientSeed, c.nonce, c.range) });
 }
 const shoe = await fair.shuffle(Array.from({ length: 52 }, (_, i) => i), "0123456789abcdef".repeat(4), "shoe", 0);
-const frozen = { note: "Frozen. A change that breaks these is a change that breaks verification.", rolls: produced, shoeFirstTen: shoe.slice(0, 10) };
+const frozen = {
+  note: "Frozen. A change that breaks these is a change that breaks verification.",
+  rolls: produced,
+  shoeFirstTen: shoe.slice(0, 10),
+  cardsFirstTen: (await cards.shuffledShoe("0123456789abcdef".repeat(4), "", 0)).slice(0, 10),
+};
 
 let stored;
 try {
@@ -123,6 +159,7 @@ try {
 }
 check("rolls match the frozen vectors", JSON.stringify(stored.rolls) === JSON.stringify(frozen.rolls));
 check("the shoe shuffles to the frozen order", JSON.stringify(stored.shoeFirstTen) === JSON.stringify(frozen.shoeFirstTen));
+check("the cards deal in the frozen order", JSON.stringify(stored.cardsFirstTen ?? frozen.cardsFirstTen) === JSON.stringify(frozen.cardsFirstTen));
 
 console.log(failures === 0 ? "\nAll good.\n" : `\n${failures} failing.\n`);
 process.exit(failures === 0 ? 0 : 1);
