@@ -51,9 +51,11 @@ export default function Lobby() {
     party: "lobby",
     room: "main",
     onMessage(event) {
-      const msg = JSON.parse(event.data as string) as LobbyMessage;
+      const msg = JSON.parse(event.data as string) as Partial<LobbyMessage>;
       if (msg.type === "tables") {
-        setLobby(msg);
+        // A table server deployed before this page sends no house tables; read
+        // what's there rather than fall over while the two catch up.
+        setLobby({ type: "tables", house: msg.house ?? [], tables: msg.tables ?? [] });
         setOffline(false);
       }
     },

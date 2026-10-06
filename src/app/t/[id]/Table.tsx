@@ -404,7 +404,7 @@ export function Table({ id, sitOnArrival, justCreated }: { id: string; sitOnArri
   const tableInfo = (
     <div className="table-info">
       <span className="table-tag">{state?.name ?? (state?.isPrivate ?? id.startsWith("p-") ? "Private" : "Public")}</span>
-      {state ? <span className="table-tag table-limit">{describeLimit(state.limit)}</span> : null}
+      {state && state.limit !== undefined ? <span className="table-tag table-limit">{describeLimit(state.limit)}</span> : null}
       <button className="table-id" onClick={() => copy("code")} aria-label={`Copy table code ${code}`} title="Copy code">
         {code}
         {copyIcon("code")}
