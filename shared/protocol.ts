@@ -5,6 +5,7 @@ export const SEATS = 5;
 /** The smallest bet at any table. The largest is the table's own limit: see shared/tables.ts. */
 export const MIN_BET = 10;
 export const STARTER_CHIPS = 5000;
+/** The chips every table has. Bigger tables add to them: see chipValues in shared/tables.ts. */
 export const CHIP_VALUES = [10, 50, 100, 500] as const;
 
 export const BETTING_MS = 15_000;

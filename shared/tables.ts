@@ -13,7 +13,7 @@
  * takes nothing.
  */
 
-import { formatChips, MIN_BET } from "./protocol";
+import { CHIP_VALUES, formatChips, MIN_BET } from "./protocol";
 
 export type Limit = number | null;
 
@@ -64,6 +64,17 @@ export function limitProblem(limit: unknown): string | null {
   if (limit < LIMIT_MIN) return `The limit has to be at least ${LIMIT_MIN}, the smallest bet.`;
   if (limit > LIMIT_MAX) return `The limit can be at most ${formatChips(LIMIT_MAX)}. For more, choose no limit.`;
   return null;
+}
+
+/**
+ * The chips a table offers. Every table has 10 to 500; from a limit of
+ * 20'000 there is a 1'000 chip too, and a table without a limit adds 5'000,
+ * so a big bet isn't forty taps on the 500.
+ */
+export function chipValues(limit: Limit): readonly number[] {
+  if (limit === null) return [...CHIP_VALUES, 1_000, 5_000];
+  if (limit >= 20_000) return [...CHIP_VALUES, 1_000];
+  return CHIP_VALUES;
 }
 
 /** "Limit 5'000" or "No limit". */

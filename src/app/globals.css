@@ -1023,6 +1023,8 @@ body:has(.app-table) { height: 100%; overflow: hidden; overscroll-behavior: none
   .dock { min-height: 64px; padding: 10px; gap: 8px; border-radius: var(--r-md); }
   .dock-chips { gap: 6px; }
   .chip-btn svg { width: 46px; height: 46px; }
+  /* Six chips on a no-limit table: on the narrowest phones they print smaller to stay in one row. */
+  .dock-chips:has(.chip-btn:nth-child(6)) .chip-btn svg { width: min(46px, calc((100vw - 66px) / 6)); height: auto; aspect-ratio: 1; }
   .dock-turn .dock-actions { display: grid; grid-template-columns: 1fr 1fr; width: 100%; }
   .dock-turn .btn-lg { min-width: 0; }
 }

@@ -52,7 +52,7 @@ export const BLACKJACK_TOUR: TourStep[] = [
     target: ".dock",
     body: (
       <p>
-        Tap chips to build your bet, from 10 to 2&apos;500. Press <strong>Deal</strong> when you&apos;re ready. The round starts when everyone is ready or
+        Tap chips to build your bet, from 10 up to the table&apos;s limit. Press <strong>Deal</strong> when you&apos;re ready. The round starts when everyone is ready or
         the timer runs out.
       </p>
     ),

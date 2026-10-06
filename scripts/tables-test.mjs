@@ -62,6 +62,15 @@ check("the smallest limit is the smallest bet", tables.LIMIT_MIN === protocol.MI
 check("describes a limit", tables.describeLimit(20000) === "Limit 20'000");
 check("describes no limit", tables.describeLimit(null) === "No limit");
 
+console.log("chips");
+const chipsAt = (limit) => JSON.stringify(tables.chipValues(limit));
+check("a 5'000 table has 10 to 500", chipsAt(5000) === "[10,50,100,500]", chipsAt(5000));
+check("an old 2'500 table keeps 10 to 500", chipsAt(tables.DEFAULT_LIMIT) === "[10,50,100,500]");
+check("a 20'000 table adds 1'000", chipsAt(20000) === "[10,50,100,500,1000]", chipsAt(20000));
+check("a bigger limit keeps the 1'000", chipsAt(100000) === "[10,50,100,500,1000]");
+check("no limit adds 1'000 and 5'000", chipsAt(null) === "[10,50,100,500,1000,5000]", chipsAt(null));
+check("19'990 is below the 1'000 chip", chipsAt(19990) === "[10,50,100,500]");
+
 console.log("house tables");
 check("three of them", tables.HOUSE_TABLES.length === 3);
 check(
@@ -204,6 +213,20 @@ function live() {
       if (house.limit === 5000) check(`${house.name}: 5'010 is refused for the limit`, /limit is 5'000/.test(refusal), refusal);
       else check(`${house.name}: 5'010 is refused only for want of chips`, refusal === "Not enough chips.", refusal);
       p.send({ type: "clearBet" });
+      await p.until((c) => c.seat().bet === 0, "the bet to clear", 5000);
+      for (const chip of [1000, 5000]) {
+        const offered = tables.chipValues(house.limit).includes(chip);
+        if (offered) {
+          p.send({ type: "bet", amount: chip });
+          await p.until((c) => c.seat().bet === chip, `a ${chip} chip`, 5000);
+          check(`${house.name}: takes the ${chip} chip`, p.seat().bet === chip);
+          p.send({ type: "clearBet" });
+          await p.until((c) => c.seat().bet === 0, "the bet to clear", 5000);
+        } else {
+          const why = await p.refused({ type: "bet", amount: chip });
+          check(`${house.name}: refuses the ${chip} chip`, why === "Unknown chip.", why);
+        }
+      }
     }
     await new Promise((r) => setTimeout(r, 300));
     const seatedNow = await lobbyList();

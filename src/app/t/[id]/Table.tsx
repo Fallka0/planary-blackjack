@@ -4,7 +4,6 @@ import { useEffect, useRef, useState } from "react";
 import { Check, CircleHelp, Copy, Link2, LogOut, MessageCircle, WifiOff } from "lucide-react";
 import { canSplitCards, formatTotal, handValue } from "../../../../shared/cards";
 import {
-  CHIP_VALUES,
   formatChips,
   type Hand,
   MAX_HANDS,
@@ -12,7 +11,7 @@ import {
   type Seat,
   type TableState,
 } from "../../../../shared/protocol";
-import { describeLimit } from "../../../../shared/tables";
+import { chipValues, describeLimit } from "../../../../shared/tables";
 import { Chat } from "@/components/Chat";
 import { ChipIcon, chipBreakdown } from "@/components/ChipIcon";
 import { PlayingCard } from "@/components/PlayingCard";
@@ -242,7 +241,7 @@ function Dock({
     return (
       <div className="dock">
         <div className="dock-chips" role="group" aria-label="Add chips to your bet">
-          {CHIP_VALUES.map((value) => (
+          {chipValues(state.limit).map((value) => (
             <button
               key={value}
               className="chip-btn"

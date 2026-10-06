@@ -8,7 +8,6 @@ import {
   CHAT_HISTORY,
   CHAT_MAX_LENGTH,
   type ChatMessage,
-  CHIP_VALUES,
   type ClientMessage,
   type Hand,
   INSURANCE_MS,
@@ -26,7 +25,7 @@ import {
   type TableState,
   TURN_MS,
 } from "../shared/protocol";
-import { DEFAULT_LIMIT, houseTable, type Limit, withinLimit } from "../shared/tables";
+import { chipValues, DEFAULT_LIMIT, houseTable, type Limit, withinLimit } from "../shared/tables";
 
 /** One number, shared with the verifier: a table dealing a different count would be unverifiable. */
 const DECKS = SHARED_DECKS;
@@ -453,7 +452,7 @@ export class Table extends Server<Env> {
       case "bet": {
         if (!seat) return "Take a seat first.";
         if (this.state.phase !== "betting" || this.starting) return "Bets are closed for this round.";
-        if (!CHIP_VALUES.includes(msg.amount as (typeof CHIP_VALUES)[number])) return "Unknown chip.";
+        if (!chipValues(this.state.limit).includes(msg.amount)) return "Unknown chip.";
         const next = seat.bet + msg.amount;
         if (!withinLimit(this.state.limit, next)) return `This table's limit is ${formatChips(this.state.limit!)} a round.`;
         if (next > seat.stack) return "Not enough chips.";
