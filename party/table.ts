@@ -13,8 +13,8 @@ import {
   type Hand,
   INSURANCE_MS,
   type PlayerLook,
+  formatChips,
   isPrivateTableId,
-  MAX_BET,
   MAX_HANDS,
   MIN_BET,
   RECONNECT_GRACE_MS,
@@ -26,6 +26,7 @@ import {
   type TableState,
   TURN_MS,
 } from "../shared/protocol";
+import { DEFAULT_LIMIT, houseTable, type Limit, withinLimit } from "../shared/tables";
 
 /** One number, shared with the verifier: a table dealing a different count would be unverifiable. */
 const DECKS = SHARED_DECKS;
@@ -54,6 +55,19 @@ interface ShoeRecord {
 }
 
 const SHOE_KEY = "shoe";
+
+/**
+ * What a player's table was opened with. Written once, by the lobby, before
+ * anyone sits down, and never again: a limit that could move mid-game would
+ * be no limit at all. House tables take theirs from shared/tables.ts instead,
+ * and a table with neither (older tables, casino invites) has DEFAULT_LIMIT.
+ */
+interface TableConfig {
+  limit: Limit;
+  createdAt: number;
+}
+
+const CONFIG_KEY = "config";
 
 interface Identity {
   playerId: string;
@@ -148,9 +162,13 @@ export class Table extends Server<Env> {
   lastChatAt = new Map<string, number>();
 
   async onStart() {
+    const house = houseTable(this.name);
+    const config = house ? null : await this.ctx.storage.get<TableConfig>(CONFIG_KEY);
     this.state = {
       id: this.name,
       isPrivate: isPrivateTableId(this.name),
+      limit: house ? house.limit : config ? config.limit : DEFAULT_LIMIT,
+      name: house?.name ?? null,
       phase: "waiting",
       seats: Array.from({ length: SEATS }, () => null),
       dealer: { cards: [], holeHidden: false },
@@ -194,6 +212,40 @@ export class Table extends Server<Env> {
     this.shoeRecord.cutCardOut = this.state.cutCardOut;
     this.shoeRecord.commitmentId = this.commitmentId;
     await this.ctx.storage.put(SHOE_KEY, this.shoeRecord);
+  }
+
+  // ── Called by the lobby, worker to worker ─────
+  //
+  // These are Durable Object RPC methods: only code holding the Table binding
+  // can reach them, never a request from the internet. They read storage
+  // directly and don't wake the table up, so asking about a table doesn't
+  // shuffle it a shoe.
+
+  /**
+   * Gives a brand-new table its limit. Refuses (false) once the table has a
+   * config or has ever opened, so the limit of a table in play can't change.
+   */
+  async configure(limit: Limit): Promise<boolean> {
+    const [config, shoe] = await Promise.all([this.ctx.storage.get(CONFIG_KEY), this.ctx.storage.get(SHOE_KEY)]);
+    if (config !== undefined || shoe !== undefined) return false;
+    await this.ctx.storage.put(CONFIG_KEY, { limit, createdAt: Date.now() } satisfies TableConfig);
+    return true;
+  }
+
+  /**
+   * Who sits here right now, for a lobby that has just woken up and lost
+   * count. A table that isn't running has nobody seated: seats live in memory
+   * and go with it.
+   */
+  async listing(): Promise<{ seated: number; phase: TableState["phase"]; limit: Limit } | null> {
+    if (!this.state) return null;
+    return { seated: this.state.seats.filter(Boolean).length, phase: this.state.phase, limit: this.state.limit };
+  }
+
+  /** Whether this table was ever created or opened: a code for it leads somewhere. */
+  async exists(): Promise<boolean> {
+    const [config, shoe] = await Promise.all([this.ctx.storage.get(CONFIG_KEY), this.ctx.storage.get(SHOE_KEY)]);
+    return config !== undefined || shoe !== undefined;
   }
 
   // ── Connections ───────────────────────────────
@@ -354,7 +406,9 @@ export class Table extends Server<Env> {
       }
       case "sit": {
         if (seat) return "You're already seated.";
-        const index = Number(msg.seat);
+        const free = this.state.seats.findIndex((s) => !s);
+        if (msg.seat === undefined && free === -1) return "This table is full. You can watch, or pick another table.";
+        const index = msg.seat === undefined ? free : Number(msg.seat);
         if (!Number.isInteger(index) || index < 0 || index >= SEATS) return "That seat doesn't exist.";
         if (this.state.seats[index]) return "That seat is taken.";
         let stack: number;
@@ -401,7 +455,7 @@ export class Table extends Server<Env> {
         if (this.state.phase !== "betting" || this.starting) return "Bets are closed for this round.";
         if (!CHIP_VALUES.includes(msg.amount as (typeof CHIP_VALUES)[number])) return "Unknown chip.";
         const next = seat.bet + msg.amount;
-        if (next > MAX_BET) return `Table maximum is ${MAX_BET}.`;
+        if (!withinLimit(this.state.limit, next)) return `This table's limit is ${formatChips(this.state.limit!)} a round.`;
         if (next > seat.stack) return "Not enough chips.";
         seat.bet = next;
         seat.ready = false;
@@ -416,7 +470,7 @@ export class Table extends Server<Env> {
       case "rebet": {
         if (!seat || this.state.phase !== "betting" || this.starting) return;
         // Whole tens, so 3:2 blackjack and half-bet insurance always come out in whole chips.
-        const amount = Math.floor(Math.min(seat.lastBet, seat.stack, MAX_BET) / 10) * 10;
+        const amount = Math.floor(Math.min(seat.lastBet, seat.stack, this.state.limit ?? Infinity) / 10) * 10;
         if (amount < MIN_BET) return "No previous bet to repeat.";
         seat.bet = amount;
         seat.ready = false;
@@ -1082,9 +1136,9 @@ export class Table extends Server<Env> {
   notifyLobby() {
     if (this.state.isPrivate) return;
     const seated = this.state.seats.filter(Boolean).length;
-    const body = JSON.stringify({ id: this.name, seated, phase: this.state.phase });
+    const { limit, phase } = this.state;
     void getServerByName(this.env.Lobby, "main")
-      .then((lobby) => lobby.fetch(new Request("https://lobby.internal/", { method: "POST", body })))
+      .then((lobby) => lobby.report({ id: this.name, seated, phase, limit }))
       .catch(() => {});
   }
 }

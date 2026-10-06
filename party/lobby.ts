@@ -1,6 +1,7 @@
 import { type Connection, Server } from "partyserver";
 import type { Env } from "./env";
-import { type LobbyMessage, type LobbyTable, SEATS } from "../shared/protocol";
+import { type CreateTableRequest, type LobbyMessage, type LobbyTable, type Phase, SEATS } from "../shared/protocol";
+import { HOUSE_TABLES, houseTable, type Limit, limitProblem } from "../shared/tables";
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -15,43 +16,128 @@ function newTableId(prefix: "t" | "p") {
   return `${prefix}-${Array.from(bytes, (b) => alphabet[b % alphabet.length]).join("")}`;
 }
 
-/** One lobby room ("main") that tracks public tables and hands out quick seats. */
+/** The players' tables listed when the lobby last looked, so it can ask after them when it wakes. */
+const LISTED_KEY = "listed";
+
+function problem(error: string, status: number) {
+  return Response.json({ error }, { status, headers: CORS });
+}
+
+/**
+ * One lobby room ("main"): lists the house tables and players' public tables,
+ * opens new tables, and turns a bare code into the table it belongs to.
+ */
 export class Lobby extends Server<Env> {
+  /** Live seat counts, as the tables report them. Public tables only. */
   tables = new Map<string, LobbyTable>();
 
-  list(): LobbyTable[] {
-    return [...this.tables.values()].sort((a, b) => b.seated - a.seated || b.updatedAt - a.updatedAt);
+  /**
+   * The lobby keeps its counts in memory, and a lobby nobody is looking at is
+   * put to sleep. Waking up, it asks the house tables and the players' tables
+   * it last listed how many sit at them, rather than showing a full table as
+   * empty until somebody next sits down or stands up.
+   */
+  async onStart() {
+    const listed = (await this.ctx.storage.get<string[]>(LISTED_KEY)) ?? [];
+    const ids = [...HOUSE_TABLES.map((t) => t.id), ...listed];
+    await Promise.all(
+      ids.map(async (id) => {
+        const now = await this.table(id)
+          .listing()
+          .catch(() => null);
+        const house = houseTable(id);
+        if (!now || (now.seated === 0 && !house)) return;
+        this.tables.set(id, { id, name: house?.name ?? null, limit: now.limit, seated: now.seated, phase: now.phase, updatedAt: Date.now() });
+      }),
+    );
+    await this.rememberListed();
+  }
+
+  /** Writes down which players' tables are listed. Only when that changes, not on every count. */
+  async rememberListed() {
+    const listed = [...this.tables.keys()].filter((id) => !houseTable(id)).sort();
+    const known = (await this.ctx.storage.get<string[]>(LISTED_KEY)) ?? [];
+    if (listed.join() !== known.join()) await this.ctx.storage.put(LISTED_KEY, listed);
+  }
+
+  list(): LobbyMessage {
+    const house = HOUSE_TABLES.map(
+      (t): LobbyTable => this.tables.get(t.id) ?? { id: t.id, name: t.name, limit: t.limit, seated: 0, phase: "waiting", updatedAt: 0 },
+    );
+    const tables = [...this.tables.values()]
+      .filter((t) => !houseTable(t.id))
+      .sort((a, b) => b.seated - a.seated || b.updatedAt - a.updatedAt);
+    return { type: "tables", house, tables };
   }
 
   publish() {
-    this.broadcast(JSON.stringify({ type: "tables", tables: this.list() } satisfies LobbyMessage));
+    this.broadcast(JSON.stringify(this.list()));
   }
 
   onConnect(conn: Connection) {
-    conn.send(JSON.stringify({ type: "tables", tables: this.list() } satisfies LobbyMessage));
+    conn.send(JSON.stringify(this.list()));
+  }
+
+  /** A public table's seat count changed. Called by the table itself, worker to worker. */
+  async report(entry: { id: string; seated: number; phase: Phase; limit: Limit }) {
+    if (!/^t-[a-z0-9]{6}$/.test(entry.id)) return;
+    const seated = Math.max(0, Math.min(SEATS, Math.floor(entry.seated) || 0));
+    const house = houseTable(entry.id);
+    // House tables stay listed when empty; a player's table leaves the lobby with its last player.
+    if (seated === 0 && !house) this.tables.delete(entry.id);
+    else this.tables.set(entry.id, { id: entry.id, name: house?.name ?? null, limit: entry.limit, seated, phase: entry.phase, updatedAt: Date.now() });
+    this.publish();
+    await this.rememberListed();
+  }
+
+  table(id: string) {
+    return this.env.Table.get(this.env.Table.idFromName(id));
   }
 
   async onRequest(req: Request) {
     if (req.method === "OPTIONS") return new Response(null, { headers: CORS });
     const url = new URL(req.url);
+    const action = url.searchParams.get("action");
 
-    if (req.method === "POST") {
-      const body = (await req.json()) as Partial<LobbyTable>;
-      if (typeof body.id !== "string" || !body.id.startsWith("t-")) return new Response("bad table", { status: 400 });
-      const seated = Math.max(0, Math.min(SEATS, Number(body.seated) || 0));
-      if (seated === 0) this.tables.delete(body.id);
-      else this.tables.set(body.id, { id: body.id, seated, phase: body.phase ?? "betting", updatedAt: Date.now() });
-      this.publish();
-      return new Response("ok", { headers: CORS });
-    }
+    if (req.method === "POST" && action === "create") return this.create(req);
+    if (action === "resolve") return this.resolve(url.searchParams.get("code") ?? "");
+    return Response.json(this.list(), { headers: CORS });
+  }
 
-    if (url.searchParams.get("action") === "quickseat") {
-      const open = this.list().find((t) => t.seated < SEATS);
-      return Response.json({ id: open?.id ?? newTableId("t") }, { headers: CORS });
+  /**
+   * Opens a player's table. The limit is written into the new table before
+   * anyone can reach it, and the table refuses to have it written twice.
+   */
+  async create(req: Request) {
+    const body = (await req.json().catch(() => null)) as Partial<CreateTableRequest> | null;
+    if (!body || !("limit" in body)) return problem("Choose a limit, or no limit.", 400);
+    const limit = body.limit ?? null;
+    const wrong = limitProblem(limit);
+    if (wrong) return problem(wrong, 400);
+    if (body.visibility !== "public" && body.visibility !== "private") return problem("Choose public or private.", 400);
+
+    const prefix = body.visibility === "public" ? "t" : "p";
+    // A random id that is already taken is vanishingly rare; a few tries settle it.
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const id = newTableId(prefix);
+      if (await this.table(id).configure(limit)) return Response.json({ id }, { headers: CORS });
     }
-    if (url.searchParams.get("action") === "private") {
-      return Response.json({ id: newTableId("p") }, { headers: CORS });
+    return problem("Couldn't open a table. Try again.", 503);
+  }
+
+  /**
+   * Finds the table behind a six-character code. A code doesn't say whether
+   * its table is public or private, so the house tables are checked first,
+   * then a public table, then a private one. A code that leads to no table
+   * that was ever opened is refused rather than opening an empty one.
+   */
+  async resolve(raw: string) {
+    const code = raw.trim().toLowerCase();
+    if (!/^[a-z0-9]{6}$/.test(code)) return problem("That doesn't look like a table code. Codes are six letters and numbers, like k7m2qx.", 400);
+    if (houseTable(`t-${code}`)) return Response.json({ id: `t-${code}` }, { headers: CORS });
+    for (const id of [`t-${code}`, `p-${code}`]) {
+      if (await this.table(id).exists()) return Response.json({ id }, { headers: CORS });
     }
-    return Response.json({ tables: this.list() }, { headers: CORS });
+    return problem("No table has that code. It may have closed, or a character is off.", 404);
   }
 }

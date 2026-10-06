@@ -1,8 +1,9 @@
 import type { Card } from "./cards";
+import type { Limit } from "./tables";
 
 export const SEATS = 5;
+/** The smallest bet at any table. The largest is the table's own limit: see shared/tables.ts. */
 export const MIN_BET = 10;
-export const MAX_BET = 2500;
 export const STARTER_CHIPS = 5000;
 export const CHIP_VALUES = [10, 50, 100, 500] as const;
 
@@ -90,6 +91,10 @@ export interface Fairness {
 export interface TableState {
   id: string;
   isPrivate: boolean;
+  /** Most one player may bet on a round here; null for no limit. Fixed for the table's life. */
+  limit: Limit;
+  /** A house table's name ("Table 1"), null for every other table. */
+  name: string | null;
   phase: Phase;
   seats: (Seat | null)[];
   dealer: { cards: Card[]; holeHidden: boolean };
@@ -108,7 +113,8 @@ export interface TableState {
 export type ClientMessage =
   /** Your contribution to the next shoe's shuffle. Taken until the shoe is cut. */
   | { type: "seed"; value: string }
-  | { type: "sit"; seat: number }
+  /** Without a seat, the table picks the first free one. */
+  | { type: "sit"; seat?: number }
   | { type: "leave" }
   | { type: "bet"; amount: number }
   | { type: "clearBet" }
@@ -143,12 +149,22 @@ export type ServerMessage =
 
 export interface LobbyTable {
   id: string;
+  /** A house table's name, null for a player's table. */
+  name: string | null;
+  limit: Limit;
   seated: number;
   phase: Phase;
   updatedAt: number;
 }
 
-export type LobbyMessage = { type: "tables"; tables: LobbyTable[] };
+/** `house`: the fixed tables, always all three. `tables`: players' public tables with someone seated. */
+export type LobbyMessage = { type: "tables"; house: LobbyTable[]; tables: LobbyTable[] };
+
+/** Asks the lobby to open a table. */
+export interface CreateTableRequest {
+  limit: Limit;
+  visibility: "public" | "private";
+}
 
 /** Table ids: "t-xxxxx" public, "p-xxxxx" private. */
 export function isPrivateTableId(id: string) {

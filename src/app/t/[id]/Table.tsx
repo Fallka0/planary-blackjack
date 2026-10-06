@@ -1,18 +1,18 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Check, CircleHelp, Copy, LogOut, MessageCircle, WifiOff } from "lucide-react";
+import { Check, CircleHelp, Copy, Link2, LogOut, MessageCircle, WifiOff } from "lucide-react";
 import { canSplitCards, formatTotal, handValue } from "../../../../shared/cards";
 import {
   CHIP_VALUES,
   formatChips,
   type Hand,
-  MAX_BET,
   MAX_HANDS,
   MIN_BET,
   type Seat,
   type TableState,
 } from "../../../../shared/protocol";
+import { describeLimit } from "../../../../shared/tables";
 import { Chat } from "@/components/Chat";
 import { ChipIcon, chipBreakdown } from "@/components/ChipIcon";
 import { PlayingCard } from "@/components/PlayingCard";
@@ -23,6 +23,7 @@ import { Tutorial, useTutorial } from "@/components/Tutorial";
 import { BLACKJACK_TOUR } from "@/lib/tutorial";
 import { CASINO_API, useWallet } from "@/components/WalletProvider";
 import { CASINO_URL } from "@/lib/auth";
+import { tableCode } from "@/lib/party";
 import { useTable } from "@/lib/useTable";
 
 function useNow(active: boolean) {
@@ -246,7 +247,7 @@ function Dock({
               key={value}
               className="chip-btn"
               onClick={() => send({ type: "bet", amount: value })}
-              disabled={seat.ready || seat.bet + value > Math.min(seat.stack, MAX_BET)}
+              disabled={seat.ready || seat.bet + value > Math.min(seat.stack, state.limit ?? Infinity)}
               aria-label={`Add ${value}`}
             >
               <ChipIcon size={52} value={value} />
@@ -259,7 +260,7 @@ function Dock({
           </span>
           {seat.bet === 0 && seat.lastBet >= MIN_BET && seat.stack >= MIN_BET ? (
             <button className="btn btn-ink" onClick={() => send({ type: "rebet" })}>
-              Rebet {formatChips(Math.floor(Math.min(seat.lastBet, seat.stack, MAX_BET) / 10) * 10)}
+              Rebet {formatChips(Math.floor(Math.min(seat.lastBet, seat.stack, state.limit ?? Infinity) / 10) * 10)}
             </button>
           ) : (
             <button className="btn btn-ink" onClick={() => send({ type: "clearBet" })} disabled={seat.bet === 0 || seat.ready}>
@@ -341,10 +342,13 @@ function Dock({
   );
 }
 
-export function Table({ id }: { id: string }) {
+export function Table({ id, sitOnArrival, justCreated }: { id: string; sitOnArrival: boolean; justCreated: boolean }) {
   const { balance, cardback } = useWallet();
   const { state, you, status, error, chat, send } = useTable(id);
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState<"code" | "link" | null>(null);
+  // Shown once, over the table, to the player who just opened it.
+  const createdDialog = useRef<HTMLDialogElement>(null);
+  const wantsSeat = useRef(sitOnArrival);
   const [chatOpen, setChatOpen] = useState(false);
   const [seenChat, setSeenChat] = useState(0);
   const tour = useTutorial("blackjack");
@@ -359,23 +363,54 @@ export function Table({ id }: { id: string }) {
   const seat = state && mySeat !== null ? state.seats[mySeat] : null;
   const chips = balance ?? 0;
 
+  // Arrived from a Join button or a table just opened: take the first free
+  // seat once the table says who we are. Once only, and the query comes off
+  // the address so a reload doesn't try again.
+  useEffect(() => {
+    if (!wantsSeat.current || !state || !you) return;
+    wantsSeat.current = false;
+    window.history.replaceState(null, "", `/t/${id}`);
+    const broke = balance !== null && balance < MIN_BET;
+    if (you.verified && you.seat === null && !broke) send({ type: "sit" });
+  }, [state, you, balance, id, send]);
+
+  useEffect(() => {
+    if (justCreated) createdDialog.current?.showModal();
+  }, [justCreated]);
+
   function sit(index: number) {
     send({ type: "sit", seat: index });
   }
 
-  function copyLink() {
-    void navigator.clipboard.writeText(window.location.href).then(() => {
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1800);
+  const code = tableCode(id);
+  function copy(what: "code" | "link") {
+    // The bare link, never the address bar: that may still carry ?sit.
+    const text = what === "code" ? code : `${window.location.origin}/t/${id}`;
+    void navigator.clipboard.writeText(text).then(() => {
+      setCopied(what);
+      window.setTimeout(() => setCopied((current) => (current === what ? null : current)), 1800);
     });
   }
 
+  const copyIcon = (what: "code" | "link") =>
+    copied === what ? (
+      <Check size={16} strokeWidth={2.4} aria-hidden="true" />
+    ) : what === "code" ? (
+      <Copy size={15} strokeWidth={2} aria-hidden="true" />
+    ) : (
+      <Link2 size={16} strokeWidth={2} aria-hidden="true" />
+    );
+
   const tableInfo = (
     <div className="table-info">
-      <span className="table-tag">{state?.isPrivate ?? id.startsWith("p-") ? "Private" : "Public"}</span>
-      <span className="table-id">{id.slice(2)}</span>
-      <button className="icon-btn" onClick={copyLink} aria-label="Copy table link">
-        {copied ? <Check size={16} strokeWidth={2.4} aria-hidden="true" /> : <Copy size={16} strokeWidth={2} aria-hidden="true" />}
+      <span className="table-tag">{state?.name ?? (state?.isPrivate ?? id.startsWith("p-") ? "Private" : "Public")}</span>
+      {state ? <span className="table-tag table-limit">{describeLimit(state.limit)}</span> : null}
+      <button className="table-id" onClick={() => copy("code")} aria-label={`Copy table code ${code}`} title="Copy code">
+        {code}
+        {copyIcon("code")}
+      </button>
+      <button className="icon-btn" onClick={() => copy("link")} aria-label="Copy table link" title="Copy link">
+        {copyIcon("link")}
       </button>
       <button className="icon-btn" onClick={tour.show} aria-label="How to play">
         <CircleHelp size={17} strokeWidth={2} aria-hidden="true" />
@@ -484,6 +519,46 @@ export function Table({ id }: { id: string }) {
         />
       </main>
 
+      {justCreated ? (
+        <dialog
+          ref={createdDialog}
+          className="sheet"
+          aria-labelledby="created-title"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) createdDialog.current?.close();
+          }}
+        >
+          <div className="sheet-card">
+            <div className="sheet-top">
+              <h2 id="created-title" className="sheet-title">
+                Your table is open
+              </h2>
+            </div>
+            <p className="field-hint">
+              {state?.isPrivate ?? id.startsWith("p-")
+                ? "It's private: only people with the code or the link can join. Both stay up in the bar above."
+                : "It's public: it shows in the lobby while someone is seated. The code and link work too, and stay up in the bar above."}
+            </p>
+            <div className="created-share">
+              <button className="share-chip" onClick={() => copy("code")} aria-label={`Copy table code ${code}`}>
+                <span className="share-label">Code</span>
+                <span className="share-value">{code}</span>
+                {copyIcon("code")}
+              </button>
+              <button className="share-chip" onClick={() => copy("link")} aria-label="Copy table link">
+                <span className="share-label">Link</span>
+                <span className="share-value">/t/{id}</span>
+                {copyIcon("link")}
+              </button>
+            </div>
+            <div className="sheet-actions">
+              <button className="btn btn-ink" onClick={() => createdDialog.current?.close()}>
+                To the table
+              </button>
+            </div>
+          </div>
+        </dialog>
+      ) : null}
       {tour.open && state ? <Tutorial steps={BLACKJACK_TOUR} onClose={tour.close} /> : null}
       {status === "closed" && state ? (
         <div className="toast toast-warn" role="status">
