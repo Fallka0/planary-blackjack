@@ -118,6 +118,8 @@ export type ClientMessage =
   | { type: "sit"; seat?: number }
   | { type: "leave" }
   | { type: "bet"; amount: number }
+  /** The whole bet for the round, typed in rather than built from chips. */
+  | { type: "setBet"; amount: number }
   | { type: "clearBet" }
   | { type: "rebet" }
   | { type: "deal" }

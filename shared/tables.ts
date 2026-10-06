@@ -77,6 +77,26 @@ export function chipValues(limit: Limit): readonly number[] {
   return CHIP_VALUES;
 }
 
+/**
+ * Checks a bet typed in as a number, for the whole round. Returns the problem,
+ * or null if the table can take it. Bets go in tens, as the chips do, so a
+ * blackjack's 3:2 and half-bet insurance always come out in whole chips.
+ */
+export function betProblem(amount: unknown, limit: Limit, stack: number): string | null {
+  if (typeof amount !== "number" || !Number.isInteger(amount)) return "A bet is a whole number of chips.";
+  if (amount < MIN_BET) return `The smallest bet is ${MIN_BET}.`;
+  if (amount % 10 !== 0) return "Bets go in tens, so a blackjack and insurance always pay whole chips.";
+  if (!withinLimit(limit, amount)) return `This table's limit is ${formatChips(limit!)} a round.`;
+  if (amount > stack) return "Not enough chips.";
+  return null;
+}
+
+/** "5'000", "5 000" and "5000" all mean five thousand. Null when it isn't a number at all. */
+export function readChips(text: string): number | null {
+  const digits = text.replace(/['’\s]/g, "");
+  return /^\d+$/.test(digits) ? Number(digits) : null;
+}
+
 /** "Limit 5'000" or "No limit". */
 export function describeLimit(limit: Limit) {
   if (limit === null) return "No limit";

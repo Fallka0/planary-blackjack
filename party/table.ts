@@ -25,7 +25,7 @@ import {
   type TableState,
   TURN_MS,
 } from "../shared/protocol";
-import { chipValues, DEFAULT_LIMIT, houseTable, type Limit, withinLimit } from "../shared/tables";
+import { betProblem, chipValues, DEFAULT_LIMIT, houseTable, type Limit, withinLimit } from "../shared/tables";
 
 /** One number, shared with the verifier: a table dealing a different count would be unverifiable. */
 const DECKS = SHARED_DECKS;
@@ -457,6 +457,16 @@ export class Table extends Server<Env> {
         if (!withinLimit(this.state.limit, next)) return `This table's limit is ${formatChips(this.state.limit!)} a round.`;
         if (next > seat.stack) return "Not enough chips.";
         seat.bet = next;
+        seat.ready = false;
+        this.startBettingClock();
+        return;
+      }
+      case "setBet": {
+        if (!seat) return "Take a seat first.";
+        if (this.state.phase !== "betting" || this.starting) return "Bets are closed for this round.";
+        const problem = betProblem(msg.amount, this.state.limit, seat.stack);
+        if (problem) return problem;
+        seat.bet = msg.amount;
         seat.ready = false;
         this.startBettingClock();
         return;

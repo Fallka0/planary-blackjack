@@ -859,6 +859,38 @@ body:has(.app-table) { height: 100%; overflow: hidden; overscroll-behavior: none
 .dock-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
 .dock-bet { color: var(--text-2); font-variant-numeric: tabular-nums; margin-right: 6px; }
 .dock-bet strong { color: var(--text); font-size: 1.2rem; }
+
+/* The bet, typed over: reads like the old "Bet 250" until you click into it. */
+.bet-field { position: relative; display: flex; align-items: center; gap: 8px; margin-right: 6px; }
+.bet-field-label { color: var(--text-2); }
+.bet-field-input {
+  width: 96px;
+  height: 40px;
+  padding: 0 10px;
+  border-radius: 12px 4px 12px 4px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 1.2rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+.bet-field-input:hover:not(:disabled) { border-color: var(--line-2); background: var(--layer-1); cursor: text; }
+.bet-field-input:focus { outline: none; border-color: var(--paper); background: var(--layer-1); }
+.bet-field-input[aria-invalid="true"] { border-color: var(--cherry); }
+.bet-field-input:disabled { opacity: 1; }
+.bet-field-hint {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 4px);
+  white-space: nowrap;
+  color: var(--text-3);
+  font-size: 0.76rem;
+  pointer-events: none;
+}
+.bet-field-hint.is-problem { color: #ff8da1; }
 .dock-turn .btn-lg { min-width: 120px; }
 
 .toast {

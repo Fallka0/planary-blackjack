@@ -11,7 +11,7 @@ import {
   type Seat,
   type TableState,
 } from "../../../../shared/protocol";
-import { chipValues, describeLimit } from "../../../../shared/tables";
+import { betProblem, chipValues, describeLimit, readChips } from "../../../../shared/tables";
 import { Chat } from "@/components/Chat";
 import { ChipIcon, chipBreakdown } from "@/components/ChipIcon";
 import { PlayingCard } from "@/components/PlayingCard";
@@ -206,6 +206,66 @@ function statusLine(state: TableState, mySeat: number | null, now: number) {
   }
 }
 
+/**
+ * The bet, as a number you can type over. Chips add to it; this sets the
+ * whole of it at once. Checked here as you type, and again by the table,
+ * which is the one that decides.
+ */
+function BetField({ seat, state, send }: { seat: Seat; state: TableState; send: ReturnType<typeof useTable>["send"] }) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const editing = draft !== null;
+  const amount = editing ? readChips(draft) : null;
+  const problem = editing && draft.trim() !== "" ? (amount === null ? "Type a number of chips, like 250." : betProblem(amount, state.limit, seat.stack)) : null;
+  const max = Math.min(seat.stack, state.limit ?? Infinity);
+
+  function submit(event: React.FormEvent) {
+    event.preventDefault();
+    if (amount === null || problem) return;
+    if (amount !== seat.bet) send({ type: "setBet", amount });
+    setDraft(null);
+    (document.activeElement as HTMLElement | null)?.blur();
+  }
+
+  return (
+    <form className="bet-field" onSubmit={submit}>
+      <label htmlFor="bet-amount" className="bet-field-label">
+        Bet
+      </label>
+      <input
+        id="bet-amount"
+        className="bet-field-input num"
+        inputMode="numeric"
+        autoComplete="off"
+        value={editing ? draft : formatChips(seat.bet)}
+        onFocus={(event) => {
+          setDraft(seat.bet ? String(seat.bet) : "");
+          const input = event.currentTarget;
+          requestAnimationFrame(() => input.select());
+        }}
+        onChange={(event) => setDraft(event.target.value)}
+        onBlur={() => window.setTimeout(() => setDraft(null), 150)}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") {
+            setDraft(null);
+            event.currentTarget.blur();
+          }
+        }}
+        disabled={seat.ready}
+        aria-invalid={problem !== null}
+        aria-describedby="bet-hint"
+      />
+      {editing ? (
+        <button type="submit" className="btn btn-paper btn-sm" disabled={amount === null || problem !== null} onMouseDown={(event) => event.preventDefault()}>
+          Set
+        </button>
+      ) : null}
+      <span id="bet-hint" className={`bet-field-hint${problem ? " is-problem" : ""}`} role={problem ? "alert" : undefined}>
+        {problem ?? (editing ? `In tens, ${MIN_BET} to ${formatChips(Math.floor(max / 10) * 10)}` : "")}
+      </span>
+    </form>
+  );
+}
+
 function Dock({
   state,
   seat,
@@ -254,9 +314,7 @@ function Dock({
           ))}
         </div>
         <div className="dock-actions">
-          <span className="dock-bet">
-            Bet <strong>{formatChips(seat.bet)}</strong>
-          </span>
+          <BetField seat={seat} state={state} send={send} />
           {seat.bet === 0 && seat.lastBet >= MIN_BET && seat.stack >= MIN_BET ? (
             <button className="btn btn-ink" onClick={() => send({ type: "rebet" })}>
               Rebet {formatChips(Math.floor(Math.min(seat.lastBet, seat.stack, state.limit ?? Infinity) / 10) * 10)}

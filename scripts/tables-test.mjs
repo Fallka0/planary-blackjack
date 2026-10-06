@@ -71,6 +71,18 @@ check("a bigger limit keeps the 1'000", chipsAt(100000) === "[10,50,100,500,1000
 check("no limit adds 1'000 and 5'000", chipsAt(null) === "[10,50,100,500,1000,5000]", chipsAt(null));
 check("19'990 is below the 1'000 chip", chipsAt(19990) === "[10,50,100,500]");
 
+console.log("typed bets");
+check("reads 5'000 as five thousand", tables.readChips("5'000") === 5000);
+check("reads 5 000 too", tables.readChips(" 5 000 ") === 5000);
+check("reads letters as nothing", tables.readChips("lots") === null);
+check("takes a bet in tens within the limit", tables.betProblem(1230, 5000, 5000) === null);
+check("takes no limit at its word", tables.betProblem(250_000, null, 300_000) === null);
+check("refuses a bet that isn't in tens", /tens/.test(tables.betProblem(1235, 5000, 5000) ?? ""));
+check("refuses a bet under the smallest", /smallest/.test(tables.betProblem(5, 5000, 5000) ?? ""));
+check("refuses a fraction", /whole/.test(tables.betProblem(12.5, 5000, 5000) ?? ""));
+check("refuses past the table's limit", /limit is 5'000/.test(tables.betProblem(5010, 5000, 9000) ?? ""));
+check("refuses past the player's chips", /Not enough/.test(tables.betProblem(3000, 5000, 2000) ?? ""));
+
 console.log("house tables");
 check("three of them", tables.HOUSE_TABLES.length === 3);
 check(
@@ -212,6 +224,20 @@ function live() {
       const refusal = await p.refused({ type: "bet", amount: 10 });
       if (house.limit === 5000) check(`${house.name}: 5'010 is refused for the limit`, /limit is 5'000/.test(refusal), refusal);
       else check(`${house.name}: 5'010 is refused only for want of chips`, refusal === "Not enough chips.", refusal);
+      p.send({ type: "clearBet" });
+      await p.until((c) => c.seat().bet === 0, "the bet to clear", 5000);
+      // A bet typed in as a number: the whole bet at once, checked by the table.
+      p.send({ type: "setBet", amount: 1230 });
+      await p.until((c) => c.seat().bet === 1230, "a typed bet of 1'230", 5000);
+      check(`${house.name}: takes a typed bet of 1'230`, p.seat().bet === 1230);
+      const tens = await p.refused({ type: "setBet", amount: 1235 });
+      check(`${house.name}: refuses a typed bet that isn't in tens`, /tens/.test(tens), tens);
+      const tiny = await p.refused({ type: "setBet", amount: 5 });
+      check(`${house.name}: refuses a typed bet under the smallest`, /smallest/.test(tiny), tiny);
+      const big = await p.refused({ type: "setBet", amount: 6000 });
+      if (house.limit === 5000) check(`${house.name}: refuses a typed bet past the limit`, /limit is 5'000/.test(big), big);
+      else check(`${house.name}: refuses a typed bet past the player's chips`, big === "Not enough chips.", big);
+      check(`${house.name}: a refused bet leaves the last one standing`, p.seat().bet === 1230);
       p.send({ type: "clearBet" });
       await p.until((c) => c.seat().bet === 0, "the bet to clear", 5000);
       for (const chip of [1000, 5000]) {
