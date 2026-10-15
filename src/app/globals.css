@@ -1191,6 +1191,10 @@ body:has(.app-table) { height: 100%; overflow: hidden; overscroll-behavior: none
 .border-gold::before { background: conic-gradient(from 30deg, #fbe7a6, #e2a93b, #fbe7a6, #b8761c, #fbe7a6); }
 .border-holo::before { background: conic-gradient(from 0deg, #ff5a78, #fff3c4, #8ee6ff, #c58bff, #ff5a78); animation: ring-spin 6s linear infinite; }
 .border-crown::before { background: conic-gradient(from 0deg, #fbe7a6, #e2a93b, #fbe7a6, #b8761c, #fbe7a6); box-shadow: 0 0 12px rgba(247, 198, 92, 0.6); }
+/* Boardwalk rings, same ids as the casino's market. */
+.border-sand::before { background: #e8d2a6; }
+.border-lifering::before { background: repeating-conic-gradient(#e8343a 0 45deg, var(--paper) 45deg 90deg); }
+.border-ferris::before { background: repeating-conic-gradient(#ff7a3d 0 5deg, #136f6f 5deg 30deg); }
 @keyframes ring-spin { to { rotate: 360deg; } }
 
 .avatar span img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; }
@@ -1220,6 +1224,15 @@ body:has(.app-table) { height: 100%; overflow: hidden; overscroll-behavior: none
 }
 .cardback-holo .card-back, .cardback-holo .shuffle-card {
   background: repeating-linear-gradient(45deg, rgba(255, 255, 255, 0.35) 0 1px, transparent 1px 7px), linear-gradient(115deg, #ff5a78, #fff3c4, #8ee6ff, #c58bff) 0 0 / 250% 100%;
+}
+.cardback-postcard .card-back, .cardback-postcard .shuffle-card {
+  background:
+    linear-gradient(#ff7a3d, #ff7a3d) 70% 16% / 22% 16% no-repeat,
+    radial-gradient(circle, #ff7a3d 0 26%, transparent 30%) 0 0 / 10px 10px,
+    var(--paper);
+}
+.cardback-seaglass .card-back, .cardback-seaglass .shuffle-card {
+  background: repeating-conic-gradient(#5fb7a6 0 25%, #d8f0e6 0 50%) 0 0 / 16px 16px;
 }
 .cardback-holo .card-back.is-dealt { animation: deal 0.55s var(--ease-out) both, holo-pan 6s linear 0.6s infinite; }
 @keyframes holo-pan { to { background-position: 250% 0; } }
