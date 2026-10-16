@@ -26,12 +26,13 @@ const here = dirname(fileURLToPath(import.meta.url));
  */
 const staging = mkdtempSync(join(tmpdir(), "planary-fair-"));
 mkdirSync(staging, { recursive: true });
-for (const name of ["fair.ts", "deck.ts"]) {
+for (const name of ["fair.ts", "deck.ts", "slots.ts"]) {
   const source = readFileSync(join(here, "..", "shared", name), "utf8");
   writeFileSync(join(staging, name), source.replace(/(from "\.\/[A-Za-z]+)"/g, '$1.ts"'));
 }
 const fair = await import(`file://${join(staging, "fair.ts")}`);
 const cards = await import(`file://${join(staging, "deck.ts")}`);
+const slots = await import(`file://${join(staging, "slots.ts")}`);
 const VECTORS = join(here, "..", "shared", "fair.vectors.json");
 
 let failures = 0;
@@ -120,6 +121,32 @@ check("a hand dealt off the shoe verifies", cards.checkCards(realShoe, 10, realS
 check("one wrong card is caught", !cards.checkCards(realShoe, 10, [...realShoe.slice(10, 15), "Aspade"]).ok);
 check("the right cards at the wrong position are caught", !cards.checkCards(realShoe, 11, realShoe.slice(10, 16)).ok);
 
+console.log("\nThe machines");
+// A slot machine's strips are normally the one thing a player never sees, so
+// a changed strip would be the easiest dishonesty in the building to hide.
+// Here the strips are in shared/slots.ts and their consequences are pinned:
+// the stated return is recomputed from them (scripts/rtp.mjs does this
+// exhaustively; this is the cheap closed form), and the stops a known seed
+// produces are frozen below.
+for (const machine of slots.MACHINES) {
+  const stops = await slots.stopsFor(machine, shoeSeed, "reels", 1);
+  const again = await slots.stopsFor(machine, shoeSeed, "reels", 1);
+  const next = await slots.stopsFor(machine, shoeSeed, "reels", 2);
+  const window = slots.windowAt(machine, stops);
+  check(`${machine.name}: one stop per reel, on the strip`, stops.length === machine.reels.length && stops.every((stop, i) => stop >= 0 && stop < machine.reels[i].length));
+  check(`${machine.name}: the same spin number stops in the same place`, stops.join() === again.join());
+  check(`${machine.name}: the next one does not`, stops.join() !== next.join());
+  check(`${machine.name}: the window shows ${machine.rows} row${machine.rows > 1 ? "s" : ""} a reel`, window.every((reel) => reel.length === machine.rows));
+  // The window wraps round the end of the strip rather than running off it.
+  const wrapped = slots.windowAt(machine, machine.reels.map((reel) => reel.length - 1));
+  check(`${machine.name}: the strip is a loop`, wrapped.every((reel) => reel.every((pip) => typeof pip === "string")));
+  check(`${machine.name}: returns the ${(machine.rtp * 100).toFixed(2)}% it prints`, Math.abs(slots.oddsOf(machine).rtp - machine.rtp) < 0.0001);
+  check(`${machine.name}: a stake is whole chips`, machine.lineBets.every((bet) => Number.isInteger(bet) && bet >= 1));
+  const paid = slots.payOut(machine, window, 10);
+  check(`${machine.name}: a paid spin stakes ${machine.lines.length} × 10`, paid.staked === machine.lines.length * 10);
+  check(`${machine.name}: a free spin stakes nothing and awards nothing`, slots.payOut(machine, window, 10, true).staked === 0 && slots.payOut(machine, window, 10, true).freeSpins === 0);
+}
+
 console.log("\nVerification");
 const proof = { hash, serverSeed: seed, clientSeed: "alice|bob", nonce: 7 };
 const outcome = await fair.roll(seed, proof.clientSeed, 7, 37);
@@ -147,6 +174,24 @@ const frozen = {
   rolls: produced,
   shoeFirstTen: shoe.slice(0, 10),
   cardsFirstTen: (await cards.shuffledShoe("0123456789abcdef".repeat(4), "", 0)).slice(0, 10),
+  // Per machine version: the strip lengths, the stated return, and where the
+  // reels stop on five known spins. A strip edited anywhere moves one of these.
+  // Every version is here, retired ones too, because old rounds are verified
+  // against the machine they were played on. Version 1 keeps its bare id, the
+  // key it was first frozen under.
+  machines: Object.fromEntries(
+    await Promise.all(
+      slots.ALL_VERSIONS.map(async (machine) => [
+        machine.version === 1 ? machine.id : `${machine.id}@v${machine.version}`,
+        {
+          version: machine.version,
+          strips: machine.reels.map((reel) => reel.length),
+          rtp: Number(slots.oddsOf(machine).rtp.toFixed(6)),
+          stopsFirstFive: await Promise.all([0, 1, 2, 3, 4].map((n) => slots.stopsFor(machine, "0123456789abcdef".repeat(4), "", n))),
+        },
+      ]),
+    ),
+  ),
 };
 
 let stored;
@@ -160,6 +205,7 @@ try {
 check("rolls match the frozen vectors", JSON.stringify(stored.rolls) === JSON.stringify(frozen.rolls));
 check("the shoe shuffles to the frozen order", JSON.stringify(stored.shoeFirstTen) === JSON.stringify(frozen.shoeFirstTen));
 check("the cards deal in the frozen order", JSON.stringify(stored.cardsFirstTen ?? frozen.cardsFirstTen) === JSON.stringify(frozen.cardsFirstTen));
+check("the reels stop at the frozen points", JSON.stringify(stored.machines ?? frozen.machines) === JSON.stringify(frozen.machines));
 
 console.log(failures === 0 ? "\nAll good.\n" : `\n${failures} failing.\n`);
 process.exit(failures === 0 ? 0 : 1);
