@@ -89,7 +89,7 @@ function HandView({ hand, active, seatOrder }: { hand: Hand; active: boolean; se
   );
 }
 
-function SeatView({
+export function SeatView({
   seat,
   index,
   state,
@@ -140,7 +140,16 @@ function SeatView({
           </span>
         </span>
         <span className="plate-copy">
-          {seat.look?.title ? <span className="plate-title">{seat.look.title}</span> : null}
+          {seat.look?.title ? (
+            // The Midnight Macau legendary title reads 险中求, in holo, as it does in the casino.
+            seat.look.title === "Risk for Riches" ? (
+              <span className="plate-title is-risk" title="Risk for Riches">
+                险中求
+              </span>
+            ) : (
+              <span className="plate-title">{seat.look.title}</span>
+            )
+          ) : null}
           <span className="plate-name">
             {mine ? "You" : seat.name}
           </span>
@@ -151,7 +160,7 @@ function SeatView({
   );
 }
 
-function Dealer({ state }: { state: TableState }) {
+export function Dealer({ state }: { state: TableState }) {
   const { cards, holeHidden } = state.dealer;
   const wasHidden = useRef(false);
   const reveal = wasHidden.current && !holeHidden;

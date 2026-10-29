@@ -1,3 +1,7 @@
+"use client";
+
+import { useEffect, useId, useMemo, useRef } from "react";
+import { CHIP_ART } from "@/lib/chipArt";
 import { chipInks } from "@/lib/chipsets";
 
 /** Planary Chips, drawn flat in two inks. Each denomination has its own print colour, set by the player's chip set. */
@@ -8,6 +12,8 @@ function face(value: number) {
 }
 
 export function ChipIcon({ size = 18, letter, value, set }: { size?: number; letter?: string; value?: number; set?: string | null }) {
+  const art = value && set && !letter ? CHIP_ART[set]?.[value] : undefined;
+  if (art) return <ArtChip size={size} viewBox={art.viewBox} body={art.body} />;
   const colors = value ? chipInks(set, value) : { fill: "var(--cherry)", ink: "var(--paper)" };
   const text = letter ?? (value ? face(value) : "");
   const long = text.length >= 3;
@@ -32,6 +38,32 @@ export function ChipIcon({ size = 18, letter, value, set }: { size?: number; let
         <circle cx="20" cy="20" r="6.5" fill={colors.fill} />
       )}
     </svg>
+  );
+}
+
+/**
+ * Chip art from the casino's design, inline so the numbers take the poster face. Ids are made
+ * unique per chip, so a gradient never points at a copy in another chip; anything above the chip,
+ * like the lucky cat on the 500, may overflow.
+ */
+function ArtChip({ size, viewBox, body }: { size: number; viewBox: string; body: string }) {
+  const uid = useId().replace(/[^a-zA-Z0-9_-]/g, "");
+  const ref = useRef<SVGSVGElement>(null);
+  const html = useMemo(() => body.replace(/id="([^"]+)"/g, `id="${uid}-$1"`).replace(/url\(#([^)]+)\)/g, `url(#${uid}-$1)`), [body, uid]);
+  useEffect(() => {
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) ref.current?.pauseAnimations();
+  }, [html]);
+  return (
+    <svg
+      ref={ref}
+      viewBox={viewBox}
+      width={size}
+      height={size}
+      overflow="visible"
+      aria-hidden="true"
+      className="chip-icon chip-art"
+      dangerouslySetInnerHTML={{ __html: html }}
+    />
   );
 }
 

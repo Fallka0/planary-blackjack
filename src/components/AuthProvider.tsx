@@ -1,5 +1,6 @@
 "use client";
 
+import { usePathname } from "next/navigation";
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
 import { buildAuthUrl, signOutUrl } from "@/lib/auth";
 import { absorbSessionFromHash, clearSession, loadSession, verifySession } from "@/lib/session";
@@ -63,11 +64,17 @@ function goSignIn(): boolean {
   return true;
 }
 
+/** The development-only table preview needs nobody signed in. */
+const PREVIEW_USER = { id: "preview", email: "preview@planary.local", name: "Preview" };
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [session, setSession] = useState<{ user: PlanaryUser; accessToken: string } | null>(null);
+  const path = usePathname();
+  const preview = process.env.NODE_ENV !== "production" && path === "/preview";
+  const [session, setSession] = useState<{ user: PlanaryUser; accessToken: string } | null>(preview ? { user: PREVIEW_USER, accessToken: "preview" } : null);
   const [stuck, setStuck] = useState(false);
 
   useEffect(() => {
+    if (preview) return;
     let active = true;
     const stored = absorbSessionFromHash() ?? loadSession();
     if (!stored) {
@@ -97,7 +104,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       active = false;
       window.clearTimeout(timer);
     };
-  }, []);
+  }, [preview]);
 
   const signOut = useCallback(() => {
     clearSession();

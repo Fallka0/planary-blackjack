@@ -1237,6 +1237,44 @@ body:has(.app-table) { height: 100%; overflow: hidden; overscroll-behavior: none
 .cardback-holo .card-back.is-dealt { animation: deal 0.55s var(--ease-out) both, holo-pan 6s linear 0.6s infinite; }
 @keyframes holo-pan { to { background-position: 250% 0; } }
 
+
+/* Midnight Macau, same ids as the casino's market. The art is in public/cosmetics/macau. */
+/* Rings: drawn art, wider than the 3px ring and partly outside the circle, so no mask; each inset
+   fits that art's photo circle to the picture. The capybara sits above the onsen ring. */
+.ring.border-bamboo::before, .ring.border-porcelain::before, .ring.border-sakura::before, .ring.border-lacquer::before, .ring.border-rising-tide::before, .ring.border-night-sakura::before, .ring.border-mother-of-pearl::before, .ring.border-onsen::before { border-radius: 0; -webkit-mask: none; mask: none; background: center / 100% 100% no-repeat; }
+.ring.border-bamboo::before { inset: -24.07%; background-image: url(/cosmetics/macau/border-bamboo.svg); }
+.ring.border-porcelain::before { inset: -26.92%; background-image: url(/cosmetics/macau/border-porcelain.svg); }
+.ring.border-sakura::before { inset: -26.92%; background-image: url(/cosmetics/macau/border-sakura.svg); }
+.ring.border-lacquer::before { inset: -26.92%; background-image: url(/cosmetics/macau/border-lacquer.svg); }
+.ring.border-rising-tide::before { inset: -28.74%; background-image: url(/cosmetics/macau/border-rising-tide.svg); }
+.ring.border-night-sakura::before { inset: -30.0%; background-image: url(/cosmetics/macau/border-night-sakura.svg); }
+.ring.border-mother-of-pearl::before { inset: -30.0%; background-image: url(/cosmetics/macau/border-mother-of-pearl.svg); }
+.ring.border-onsen::before { inset: -66% -30% -26%; background-image: url(/cosmetics/macau/border-onsen.svg); }
+/* Card backs: each file is the whole card, its edge included. */
+.cardback-matcha .card-back, .cardback-matcha .shuffle-card, .cardback-mahjong .card-back, .cardback-mahjong .shuffle-card, .cardback-fan .card-back, .cardback-fan .shuffle-card, .cardback-hongbao .card-back, .cardback-hongbao .shuffle-card, .cardback-koi .card-back, .cardback-koi .shuffle-card, .cardback-red-dragon .card-back, .cardback-red-dragon .shuffle-card { border: 0; background: center / 100% 100% no-repeat; }
+.cardback-matcha .card-back, .cardback-matcha .shuffle-card { background-image: url(/cosmetics/macau/cardback-matcha.svg); }
+.cardback-mahjong .card-back, .cardback-mahjong .shuffle-card { background-image: url(/cosmetics/macau/cardback-mahjong.svg); }
+.cardback-fan .card-back, .cardback-fan .shuffle-card { background-image: url(/cosmetics/macau/cardback-fan.svg); }
+.cardback-hongbao .card-back, .cardback-hongbao .shuffle-card { background-image: url(/cosmetics/macau/cardback-hongbao.svg); }
+.cardback-koi .card-back, .cardback-koi .shuffle-card { background-image: url(/cosmetics/macau/cardback-koi.svg); }
+.cardback-red-dragon .card-back, .cardback-red-dragon .shuffle-card { background-image: url(/cosmetics/macau/cardback-red-dragon.svg); }
+/* Animated art has a still copy for reduced motion (CSS can't pause an SVG used as an image). */
+@media (prefers-reduced-motion: reduce) {
+  .ring.border-lacquer::before { background-image: url(/cosmetics/macau/border-lacquer.static.svg); }
+  .ring.border-rising-tide::before { background-image: url(/cosmetics/macau/border-rising-tide.static.svg); }
+  .ring.border-night-sakura::before { background-image: url(/cosmetics/macau/border-night-sakura.static.svg); }
+  .ring.border-mother-of-pearl::before { background-image: url(/cosmetics/macau/border-mother-of-pearl.static.svg); }
+  .ring.border-onsen::before { background-image: url(/cosmetics/macau/border-onsen.static.svg); }
+  .cardback-hongbao .card-back, .cardback-hongbao .shuffle-card { background-image: url(/cosmetics/macau/cardback-hongbao.static.svg); }
+  .cardback-koi .card-back, .cardback-koi .shuffle-card { background-image: url(/cosmetics/macau/cardback-koi.static.svg); }
+  .cardback-red-dragon .card-back, .cardback-red-dragon .shuffle-card { background-image: url(/cosmetics/macau/cardback-red-dragon.static.svg); }
+}
+/* Risk for Riches reads 险中求 at the table, in holo. */
+.plate-title.is-risk { font-family: "Noto Serif TC", "PingFang TC", "Microsoft JhengHei", serif; font-size: 0.78rem; letter-spacing: 0.2em; color: #fff3c4; }
+@supports (background-clip: text) {
+  .plate-title.is-risk { background: linear-gradient(110deg, #ff5a78, #fff3c4, #8ee6ff, #c58bff, #ff5a78) 0 0 / 300% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: holo-pan 6s linear infinite; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
@@ -1309,3 +1347,10 @@ body:has(.app-table) { height: 100%; overflow: hidden; overscroll-behavior: none
 
 .fair-link { color: var(--gold, #f5c451); font-size: 0.76rem; text-decoration: underline; text-underline-offset: 3px; }
 .fair-link:hover { color: var(--text); }
+
+/* ── /preview (development only) ── */
+.pv-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; padding: 10px 16px; background: var(--shell, #3b0d1f); color: var(--paper); font-size: 0.85rem; }
+.pv-pick { display: inline-flex; align-items: center; gap: 6px; }
+.pv-pick span { opacity: 0.75; }
+.pv-pick select { padding: 4px 6px; border-radius: 8px; border: 1px solid rgba(246, 238, 228, 0.25); background: #2a0915; color: var(--paper); text-transform: capitalize; }
+.pv-chips { display: inline-flex; gap: 4px; margin-left: auto; }
