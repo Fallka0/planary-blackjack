@@ -1,0 +1,8 @@
+// The local stand-in for planary-casino-api, run next to the table by `npm run play:local`.
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "planary-casino-api",
+  "main": "casino-stub.js",
+  "compatibility_date": "2025-09-01",
+  "vars": { "LOCAL_API": "http://127.0.0.1:8799" }
+}

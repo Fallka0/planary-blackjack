@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "party": "wrangler dev --port 1999",
-    "party:deploy": "wrangler deploy"
+    "party:deploy": "wrangler deploy",
+    "play:local": "node scripts/play-local.mjs"
   },
   "dependencies": {
     "lucide-react": "^1.47.0",

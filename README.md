@@ -38,6 +38,8 @@ npm run party   # table server (wrangler dev) on localhost:1999
 npm run dev     # Next.js on localhost:3001
 ```
 
+To play real rounds with nothing online behind them, run `npm run play:local` alone and open [localhost:3001](http://localhost:3001). It starts the table server and the site with stand-ins for planary-auth (sign in by typing a name, and pick the card back, chips, ring and title you wear) and the casino wallet (100'000 chips each, gone on restart). A second player is a private window under another name.
+
 To see card backs, chip sets, rings and titles on the table without a server or a sign-in, run `npm run dev` alone and open [localhost:3001/preview](http://localhost:3001/preview): the real felt, dealer, shoe and seats from a made-up round, with a picker for each cosmetic. It exists in development only.
 
 Copy `.env.example` to `.env.local`. Sign-in goes through planary-auth: the app keeps the token it hands back and verifies it via `auth.planary.ch/api/auth/me` (no Supabase keys needed). Only signed-in players can sit; others can watch.
