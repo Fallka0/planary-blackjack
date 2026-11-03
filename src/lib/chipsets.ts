@@ -53,6 +53,39 @@ export const CHIPSETS: Record<string, Record<number, ChipInks>> = {
     1000: { fill: "#ffd166", ink: "#5a0f22" },
     5000: { fill: "#5a0f22", ink: "#ff9ec0" },
   },
+  // Midnight Macau. Drawn from their own art (src/lib/chipArt.ts); these two inks are the fallback.
+  "chips-mochi": {
+    10: { fill: "#f2a7b8", ink: "#8e2c48" },
+    50: { fill: "#f6efe6", ink: "#6b5a48" },
+    100: { fill: "#9cc48a", ink: "#2f4a22" },
+    500: { fill: "#ecc77a", ink: "#6b4a12" },
+    1000: { fill: "#c7b6e8", ink: "#4a3577" },
+    5000: { fill: "#9fc9e8", ink: "#23476b" },
+  },
+  "chips-tea": {
+    10: { fill: "#efe6d2", ink: "#6b5a3e" },
+    50: { fill: "#5f8f3a", ink: "#eef4df" },
+    100: { fill: "#a8642a", ink: "#fbeedb" },
+    500: { fill: "#17100f", ink: "#f3e6cf" },
+    1000: { fill: "#8a3a26", ink: "#fbece4" },
+    5000: { fill: "#c9a24a", ink: "#2a2010" },
+  },
+  "chips-jade": {
+    10: { fill: "#b8c9ad", ink: "#3f5a35" },
+    50: { fill: "#7d68b6", ink: "#f6f0ff" },
+    100: { fill: "#1f5e4b", ink: "#effbe8" },
+    500: { fill: "#0c3a2d", ink: "#e9c46a" },
+    1000: { fill: "#b8455a", ink: "#fff0f2" },
+    5000: { fill: "#c9a03a", ink: "#4a3208" },
+  },
+  "chips-lucky-cat": {
+    10: { fill: "#efe5cf", ink: "#8e1420" },
+    50: { fill: "#8e1420", ink: "#efe5cf" },
+    100: { fill: "#141014", ink: "#e8b84a" },
+    500: { fill: "#e8b84a", ink: "#141014" },
+    1000: { fill: "#16583c", ink: "#e8b84a" },
+    5000: { fill: "#3b0f5c", ink: "#e8b84a" },
+  },
 };
 
 export function chipInks(set: string | null | undefined, value: number): ChipInks {
